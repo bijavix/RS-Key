@@ -66,6 +66,7 @@
 # Internals
 
 - [Architecture](architecture.md)
+- [HSM image design](hsm-design.md)
 - [Host protocol](protocol.md)
 - [Testing](testing.md)
 - [Reproducing the evidence](reproducing.md)
