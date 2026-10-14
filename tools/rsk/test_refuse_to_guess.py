@@ -33,8 +33,8 @@ sys.modules.setdefault("fido2", types.ModuleType("fido2"))
 
 import pytest  # noqa: E402
 
-from rsk import (audit, backup, ccid, common, fido, hw, inventory, led, lock,  # noqa: E402
-                 offboard, openpgp, otp)
+from rsk import (audit, backup, ccid, common, fido, hsm, hw, inventory, led,  # noqa: E402
+                 lock, offboard, openpgp, otp)
 
 PKG = pathlib.Path(__file__).parent
 
@@ -66,6 +66,9 @@ SITES = {
         ("att_clear", "connect_fido", "True"),
         ("att_set_rpids", "connect_fido", "True"),
         ("att_status", "connect_fido", None),
+    ],
+    "hsm": [
+        ("connect", "ccid.connect", "exclusive"),
     ],
     "hw": [
         ("_run_ccid", "ccid.connect", "True"),
@@ -260,6 +263,12 @@ DRIVEN = [
      ("connect_fido", True)),
     (fido, ["fido", "attestation", "clear"], ("connect_fido", True)),
     (fido, ["fido", "attestation", "status"], ("connect_fido", False)),
+    (hsm, ["hsm", "status"], ("ccid.connect", False)),
+    (hsm, ["hsm", "attest"], ("ccid.connect", False)),
+    (hsm, ["hsm", "lock", "arm"], ("ccid.connect", True)),
+    (hsm, ["hsm", "lock", "unlock", "--key-hex", "00" * 32], ("ccid.connect", True)),
+    (hsm, ["hsm", "lock", "disarm"], ("ccid.connect", True)),
+    (hsm, ["hsm", "dkek", "create"], ("ccid.connect", True)),
     (hw, ["hw", "--product", "x"], ("ccid.connect", True)),
     (inventory, ["inventory", "verify"], ("connect_fido", True)),
     (hw, ["hw", "--transport", "fido", "--product", "x"], ("connect_fido", True)),

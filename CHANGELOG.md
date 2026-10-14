@@ -127,6 +127,17 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
   input under the fuzzer); a triple that does not carry a message there and back,
   or a `d` past the modulus, is now refused after two exponentiations.
   **bcdDevice → 0x09DF.**
+- **`rsk hsm`.** `status` reads the HSM image's version, serial, PIN tries,
+  lock and DKEK; `attest` checks `2F02`'s chain to the device root and that root
+  against the rescue applet's device key, and with `--key N` the attested request
+  OpenSC stored when it generated key N — `--expect-root` pins the root, so a
+  swapped device cannot pass. `lock arm` draws a 32-byte unlock secret, shows it
+  once (BIP-39, SLIP-39 or hex) and arms the lock with the SO-PIN and a touch;
+  `lock unlock` presents it — from a file, for a boot-time unit — and `lock
+  disarm` undoes the arm. `dkek create` draws a DKEK share and shows it as SLIP-39
+  T-of-N shares before importing it; `dkek import` rebuilds one from them. Every
+  command that changes the device, or hands it a secret, binds one reader or
+  none. `rsk` → 0.3.38.
 
 ## [0.4.11] - 2026-09-08
 
