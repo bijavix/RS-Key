@@ -3009,7 +3009,7 @@ it does not promote MODELLED-ONLY to a proof or turn bounded Kani into PROVEN.
 behaviour than the firmware, "which is sound for safety". That was false**, and
 the one that broke it was holding the green run up: `PowerCut` left the seed as
 the cut found it, while the firmware regenerates a missing seed on **every**
-boot (`firmware/src/main.rs:668`, `tools/emu/src/device.rs:507`). A cut device
+boot (`firmware/src/main.rs:668`, `tools/emu/src/device.rs:522`). A cut device
 was permanently seedless in the model and could never hold a usable credential
 again — the model was *narrower* than the code, which is the one direction a
 safety argument cannot absorb. It is fixed (`BootEnsuresSeed`), and every

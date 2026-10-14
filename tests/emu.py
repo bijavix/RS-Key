@@ -76,6 +76,11 @@ NEEDS_YUBICO = {"30_ccid_transport": "asserts the Yubico ATR — start the emula
 # differs from byte 1 on.
 ATR_YUBICO_PREFIX = bytes([0x3B, 0xFD])
 
+# Suites for the HSM image's card, which the emulator serves only when started
+# `--hsm` — and asked, the way the Yubico identity is, rather than assumed.
+NEEDS_HSM = {"86_hsm": "drives the HSM image's card — start the emulator with --hsm"}
+HSM_AID = bytes.fromhex("E82B0601040181C31F0201")
+
 # What the emulator has nothing to answer with, and why. Each of these fails on
 # the emulator for a reason that is not a defect, so it is refused before it
 # starts. Removing an entry is a claim that the emulator grew the capability.
@@ -439,7 +444,8 @@ def _install_smartcard():
 
 
 def _patch_replug():
-    """Replace `replug.wait_gone`/`wait_back` with the emulator's power cycle.
+    """Replace `replug.wait_gone`/`wait_back`, and the card-only
+    `power_cycle_card`, with the emulator's power cycle.
 
     Patching the two waits, rather than faking a gap in the enumeration, is what
     keeps this deterministic: the suites poll `find()` in several shapes (some
@@ -463,8 +469,13 @@ def _patch_replug():
         dev.open_path()
         return dev, ctaphid_init(dev), time.time()
 
+    def power_cycle_card(why=None):
+        power_cycle()
+        return EmuReader()
+
     replug.wait_gone = wait_gone
     replug.wait_back = wait_back
+    replug.power_cycle_card = power_cycle_card
 
 
 def _card_identity():
@@ -478,6 +489,18 @@ def _card_identity():
         return atr
     except Exception:
         return None
+
+
+def _serves_hsm():
+    """Whether the card answers SELECT of the HSM applet."""
+    try:
+        card = EmuCard()
+        card.connect()
+        _, sw1, sw2 = card.transmit(list(bytes([0x00, 0xA4, 0x04, 0x00, len(HSM_AID)]) + HSM_AID))
+        card.disconnect()
+        return (sw1, sw2) == (0x90, 0x00)
+    except Exception:
+        return False
 
 
 def main():
@@ -497,6 +520,9 @@ def main():
         if atr is None or not atr.startswith(ATR_YUBICO_PREFIX):
             print(f"SKIP: {name} — {NEEDS_YUBICO[name]}.")
             sys.exit(EXIT_SKIP)
+    if name in NEEDS_HSM and not _serves_hsm():
+        print(f"SKIP: {name} — {NEEDS_HSM[name]}.")
+        sys.exit(EXIT_SKIP)
     install()
     sys.argv = sys.argv[1:]
     # The suites add their own directory to sys.path for `_device`; do it here

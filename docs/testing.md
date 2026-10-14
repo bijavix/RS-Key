@@ -113,9 +113,12 @@ break) / ML-KEM decoding, the FIDO post-quantum credential path (the
 `(alg, curve)` box codec + `CredKey` dispatch → sign / COSE-AKP encode), the
 trusted-display `Label` sanitizer (attacker rpId / account text must stay
 printable ASCII, no bidi / homoglyph escape, and the confirm screen must
-render without panic), and the seed-blob format/migration state machine.
+render without panic), the seed-blob format/migration state machine, and the
+HSM image's key-backup blob decoder (`hsm_blob`: the harness holds the DKEK and
+seals whatever the fuzzer chose, so every input reaches the key-field parser
+past the MAC — and a restored key must wrap back to the same fields).
 
-Most targets drive one applet from a fresh state. Four are **stateful**. They
+Most targets drive one applet from a fresh state. Five are **stateful**. They
 replay an attacker-chosen *sequence* against persistent state, hunting the
 multi-step seams a fresh-state target can't reach (both real bugs of this
 class, the largeBlobs overflow and the mgmt write→read mismatch, were
@@ -126,6 +129,12 @@ multi-step):
   chaining and the file system persist across APDUs. State leaking between
   applets, a SELECT mid-chain, FID collisions. (GENERATE is skipped, as on
   device the RSA prime search is fast-pathed off the dispatcher.)
+- `hsm_apdu` drives the HSM image's card — `HsmApplets`, booted by `hsm_boot` —
+  from inside a working token: initialized, a DKEK share in, the PIN verified,
+  two keys of known value restored. Opcodes stand in for what a mutator cannot
+  spell (a box over the lock channel, a power cycle); the oracle checks every
+  reply against a model of the lock — nothing that needs the device key
+  succeeds while it is closed — and for the restored key material in the clear.
 - `fido_session` replays a CTAPHID_CBOR message sequence against one
   `FidoState` + `Fs` with an all-permissions token armed and a resident
   credential provisioned. PIN/token state, the credential store, large blobs
@@ -814,8 +823,9 @@ nix develop -c python tests/emu.py tests/11_fido_makecredential.py
 `tests/emu.py` puts a fake `hid` module and a fake `smartcard` package in front of
 the target script and points the power-cycle helper at the emulator's replug
 opcode, so no test file changes and neither hidapi nor pyscard need be installed.
-**42 of the 52 suites pass**, FIDO and card alike (two want `--pin`, one wants
-`--yubico`; a 43rd needs an enrolled `ed25519-sk` key and skips without one); the
+**43 of the 53 suites pass**, FIDO and card alike (two want `--pin`, one wants
+`--yubico`, one — `86`, the HSM image's — wants `--hsm`; a 44th needs an enrolled
+`ed25519-sk` key and skips without one); the
 other 9 are refused by name with their reason and exit 77 — they need raw USB,
 python-fido2, or hardware, and `tools/emu/README.md` lists which is which. The
 store underneath is the device's own (`crates/rsk-store`) over a mock NOR flash

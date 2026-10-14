@@ -4,7 +4,8 @@
 //! `rsk-emu` — the RS-Key applet stack on a socket, with no hardware under it.
 //!
 //! It runs the same `crates/rsk-*` code a real key runs, so a host tool can
-//! drive FIDO2/U2F, PIV, OpenPGP, OATH and the rescue interface without a board.
+//! drive FIDO2/U2F, PIV, OpenPGP, OATH and the rescue interface without a board —
+//! or, with `--hsm`, the HSM image's card, which `--vpcd` puts in a PC/SC reader.
 //! It is a development and CI tool, **not** a security key: there is no secure
 //! boot, no OTP root, no fuses, no tamper resistance, and the seed sits in a
 //! file. What it emulates is behaviour, not the device.
@@ -18,6 +19,7 @@ mod ccid;
 mod device;
 mod display;
 mod hid;
+mod hsm;
 mod otp_kbd;
 mod park;
 #[cfg(test)]
@@ -34,6 +36,7 @@ mod taps;
 mod usbip;
 mod usbip_driver;
 mod usbip_stack;
+mod vpcd;
 
 use std::io::BufRead;
 use std::net::TcpListener;
@@ -64,8 +67,12 @@ rsk-emu — RS-Key software emulator (no hardware)
 usage: rsk-emu [options]
 
   --host <addr>       bind address (default 127.0.0.1)
-  --fido-port <n>     CTAPHID port, 0 disables (default 7799)
+  --fido-port <n>     CTAPHID port, 0 disables (default 7799; none with --hsm)
   --ccid-port <n>     APDU/card port, 0 disables (default 7800)
+  --hsm               run the HSM image's card instead of the security key's
+                      applets: CCID only, as the firmware's `hsm` feature builds it
+  --vpcd [addr]       insert the card in vsmartcard's vpcd reader (default
+                      127.0.0.1:35963), so pcscd and everything on PC/SC see it
   --store <path>      persist the file system here (default: memory only)
   --touch             ask for every user presence on the terminal
   --auto-touch-ms <n> mark presence pending, then approve it after n milliseconds
@@ -96,8 +103,9 @@ usage: rsk-emu [options]
 
 fn main() {
     let mut host = String::from("127.0.0.1");
-    let mut fido_port = DEFAULT_FIDO_PORT;
+    let mut fido_port = None;
     let mut ccid_port = DEFAULT_CCID_PORT;
+    let mut vpcd = None;
     let mut cfg = Config {
         store: None,
         presence: PresenceMode::Instant,
@@ -111,13 +119,14 @@ fn main() {
         security_trace: None,
         yubico: false,
         power_cut: None,
+        hsm: false,
     };
     let mut touch = false;
     let mut auto_touch = None;
     let mut tap_script = None;
     let mut tap_port = None;
 
-    let mut args = std::env::args().skip(1);
+    let mut args = std::env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
         let mut value = |name: &str| {
             args.next()
@@ -129,7 +138,7 @@ fn main() {
                 return;
             }
             "--host" => host = value("--host"),
-            "--fido-port" => fido_port = parse_port(&value("--fido-port")),
+            "--fido-port" => fido_port = Some(parse_port(&value("--fido-port"))),
             "--ccid-port" => ccid_port = parse_port(&value("--ccid-port")),
             "--store" => cfg.store = Some(value("--store").into()),
             "--touch" => touch = true,
@@ -145,6 +154,14 @@ fn main() {
                     _ => format!("127.0.0.1:{}", usbip::PORT),
                 })
             }
+            "--hsm" => cfg.hsm = true,
+            // Peeked, not taken: the flag after a bare `--vpcd` is the next flag.
+            "--vpcd" => {
+                vpcd = Some(
+                    args.next_if(|a| !a.starts_with("--"))
+                        .unwrap_or_else(|| format!("127.0.0.1:{}", vpcd::PORT)),
+                )
+            }
             "--trace" => cfg.trace = true,
             "--security-trace" => cfg.security_trace = Some(value("--security-trace").into()),
             "--yubico" => cfg.yubico = true,
@@ -158,8 +175,25 @@ fn main() {
         }
     }
 
-    if fido_port == 0 && ccid_port == 0 {
-        die("both transports are disabled — nothing to serve");
+    // The HSM image is a card and nothing else: no HID interface, no panel, and
+    // no USB/IP descriptor set of its own here — `--vpcd` is its host attachment.
+    if cfg.hsm {
+        if fido_port.is_some_and(|p| p != 0) {
+            die("the HSM image has no FIDO interface — drop --fido-port");
+        }
+        if cfg.display {
+            die("the HSM image has no trusted display — drop --display");
+        }
+        if cfg.usbip.is_some() {
+            die("--usbip presents the security key's interfaces; attach the HSM with --vpcd");
+        }
+        if cfg.security_trace.is_some() {
+            die("--security-trace records the FIDO state, which the HSM image does not have");
+        }
+    }
+    let fido_port = fido_port.unwrap_or(if cfg.hsm { 0 } else { DEFAULT_FIDO_PORT });
+    if fido_port == 0 && ccid_port == 0 && vpcd.is_none() {
+        die("every transport is disabled — nothing to serve");
     }
     if auto_touch.is_some() && (touch || cfg.display) {
         die("--auto-touch-ms is mutually exclusive with --touch and --display");
@@ -216,21 +250,25 @@ fn main() {
         eprintln!("emu: CTAPHID on {host}:{fido_port} (64-byte reports, both ways)");
         std::thread::spawn(move || listen_hid(listener, shared));
     }
+    // The same rule the firmware applies to its effective VID: a default build
+    // must not answer with a YubiKey's ATR, and a Yubico-identity one must.
+    let atr: &'static [u8] = if cfg.yubico {
+        rsk_usb::ccid::ATR_YUBIKEY
+    } else {
+        rsk_usb::ccid::ATR_RSKEY
+    };
     if ccid_port != 0 {
         let listener = bind(&host, ccid_port, "ccid");
         let jobs = jobs_tx.clone();
-        // The same rule the firmware applies to its effective VID: a default build
-        // must not answer with a YubiKey's ATR, and a Yubico-identity one must.
-        let atr: &'static [u8] = if cfg.yubico {
-            rsk_usb::ccid::ATR_YUBIKEY
-        } else {
-            rsk_usb::ccid::ATR_RSKEY
-        };
         eprintln!(
             "emu: CCID messages on {host}:{ccid_port} ({} identity)",
             if cfg.yubico { "Yubico" } else { "RS-Key" }
         );
         std::thread::spawn(move || ccid::listen(listener, jobs, atr));
+    }
+    if let Some(addr) = vpcd {
+        let jobs = jobs_tx.clone();
+        std::thread::spawn(move || vpcd::run_forever(&addr, jobs, atr));
     }
     // The USB stack needs a sender of its own and is started below (after the
     // last `cfg` read), so its clone is taken here — before the original is

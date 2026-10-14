@@ -1475,6 +1475,7 @@ dependencies = [
  "rsk-ec",
  "rsk-fido",
  "rsk-fs",
+ "rsk-hsm",
  "rsk-mgmt",
  "rsk-oath",
  "rsk-openpgp",

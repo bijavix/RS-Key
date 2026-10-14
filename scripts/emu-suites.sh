@@ -26,7 +26,10 @@ failed=()
 # A blank store per session is what keeps one suite's leftovers out of the next
 # session's assertions.
 start_emu() {
-  "$EMU" --store "$WORK/$1.store" --security-trace "$WORK/$1.security.jsonl" \
+  local trace=(--security-trace "$WORK/$1.security.jsonl")
+  # The HSM image has no FIDO state to trace, and the emulator refuses the flag.
+  [ "${2:-}" = --hsm ] && trace=()
+  "$EMU" --store "$WORK/$1.store" ${trace[@]+"${trace[@]}"} \
     "${@:2}" >"$WORK/$1.log" 2>&1 &
   for _ in $(seq 50); do
     grep -q "device ready" "$WORK/$1.log" && return 0
@@ -75,8 +78,8 @@ for t in tests/[0-9]*.py; do
     # want a PIN already set. `16` wants one too and has no session of its own —
     # it exists for the recording, which runs it where `21` has just set it. `09`
     # is the mirror: it wants NO PIN, and in this sweep it would meet whichever
-    # one an earlier suite left behind.
-    30_* | 28_* | 76_* | 16_* | 09_*) continue ;;
+    # one an earlier suite left behind. `86` drives the HSM image's card.
+    30_* | 28_* | 76_* | 16_* | 09_* | 86_*) continue ;;
     *) run_suite "$t" ;;
   esac
 done
@@ -130,6 +133,12 @@ python tests/emu.py tests/21_pin_webauthn.py >"$WORK/pin-setup.out" 2>&1 || {
   echo "FAIL: could not set the PIN 28/76 need"; cat "$WORK/pin-setup.out"; exit 1
 }
 for t in tests/28_*.py tests/76_*.py; do run_suite "$t" --pin 1234; done
+stop_emu
+
+echo
+echo "== on-device suites (the HSM image)"
+start_emu hsm --hsm
+for t in tests/86_*.py; do run_suite "$t"; done
 stop_emu
 
 echo

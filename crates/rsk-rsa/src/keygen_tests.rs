@@ -210,3 +210,35 @@ fn a_triple_that_is_not_a_key_rebuilds_nothing() {
         "a three-prime modulus is not a key this layer holds"
     );
 }
+
+/// The walk draws a base per attempt, so a triple refused before it draws none:
+/// a wrong `d` costs the round trip and not the walk, and a `d` past the modulus
+/// — one that works, `d + k·λ(n)`, but that no key carries — costs neither.
+#[test]
+fn a_triple_that_does_not_round_trip_is_refused_before_the_walk() {
+    struct Draws(usize);
+    impl Rng for Draws {
+        fn fill(&mut self, buf: &mut [u8]) {
+            self.0 += 1;
+            buf.fill(0x5A);
+        }
+    }
+    let e = [0x01, 0x00, 0x01];
+    let n = hex(N_HEX);
+    let key = rsa_from_pqe(&e, &hex(P_HEX), &hex(Q_HEX)).unwrap();
+    let mut wrong = key.d_be().to_vec();
+    *wrong.last_mut().unwrap() ^= 0x02;
+    let one = BigUint::from(1u8);
+    let lambda = num_integer::Integer::lcm(&(key.p() - &one), &(key.q() - &one));
+    let big_n = BigUint::from_bytes_be(&n);
+    let beyond =
+        (BigUint::from_bytes_be(&key.d_be()) + &lambda * (&big_n / &lambda + &one)).to_bytes_be();
+    for (d, what) in [(&wrong, "a wrong d"), (&beyond, "a d past the modulus")] {
+        let mut rng = Draws(0);
+        assert!(rsa_from_ned(&n, &e, d, &mut rng).is_none(), "{what}");
+        assert_eq!(rng.0, 0, "{what} reached the walk");
+    }
+    let mut rng = Draws(0);
+    assert!(rsa_from_ned(&n, &e, &key.d_be(), &mut rng).is_some());
+    assert!(rng.0 > 0, "the right d is still factored by the walk");
+}

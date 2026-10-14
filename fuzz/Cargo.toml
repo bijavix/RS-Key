@@ -37,6 +37,10 @@ rsk-rescue = { path = "../crates/rsk-rescue" }
 rsk-device = { path = "../crates/rsk-device", features = ["display"] }
 # The seventh applet's AID and its `Platform`, for the same target's applet set.
 rsk-vendor = { path = "../crates/rsk-vendor" }
+# The HSM applet the two hsm_* targets drive: its constants, its `HsmApplet` for
+# the blob target, and the wiring above for the APDU one. Already in the graph
+# under `rsk-device`; naming it adds no code.
+rsk-hsm = { path = "../crates/rsk-hsm" }
 # The store the device runs. `power_cut` used to torture a hand-written mirror of
 # it; a mirror can only be as right as whoever last synced it, and this one had
 # already drifted (no `last_error`, no `compact`, one missing counter FID).
@@ -430,6 +434,20 @@ bench = false
 [[bin]]
 name = "otp_ticket"
 path = "fuzz_targets/otp_ticket.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hsm_apdu"
+path = "fuzz_targets/hsm_apdu.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "hsm_blob"
+path = "fuzz_targets/hsm_blob.rs"
 test = false
 doc = false
 bench = false

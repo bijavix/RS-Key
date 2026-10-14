@@ -3,9 +3,9 @@
 
 //! Command framing shared by the applet replay targets (`openpgp_apdu`,
 //! `piv_apdu`, `mgmt_apdu`, `oath_apdu`, `otp_apdu`, `rescue_apdu`,
-//! `cross_applet`). Each of those is its own `[[bin]]` and the fuzz package has
-//! no lib, so they pull this in as `mod apdu_frame;` — one copy per target,
-//! resolved out of this directory because a bin root *is* a crate root.
+//! `cross_applet`, `hsm_apdu`). Each of those is its own `[[bin]]` and the fuzz
+//! package has no lib, so they pull this in as `mod apdu_frame;` — one copy per
+//! target, resolved out of this directory because a bin root *is* a crate root.
 //!
 //! The framing is `[len][apdu bytes…]*` with one escape. A one-byte length can
 //! never build a command body over 255 bytes, so the whole extended-length band

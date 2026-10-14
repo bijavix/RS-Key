@@ -107,6 +107,26 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
   HSM applet out of the key image, and documents the firmware with every feature
   but `hsm`, which cannot be built with `display`. The key image is the same code
   as before ([build.md](docs/build.md#the-hsm-image)). **bcdDevice → 0x09DE.**
+- **The HSM image on the emulator, fuzzed, and its suite.** `tools/emu --hsm`
+  serves the HSM image's card — the same `HsmApplets` and boot pass — with the
+  board worker's sequencing: a replug or a warm reboot wipes the RAM secrets
+  first, so an armed HSM comes back locked from either. `--vpcd` inserts the card
+  in vsmartcard's `vpcd` reader, so `pcscd`, and OpenSC, `pkcs11-tool` and
+  `systemd-cryptenroll` on top of it, see a card with no USB stack and no root.
+  `tests/86_hsm.py` drives the applet over PC/SC and checks every answer with
+  `cryptography`: the PINs and their counters, the device certificate chain and
+  its root against the rescue applet's key, attested EC and RSA requests, SIGN,
+  ECDH, RSA decryption, AES, a backup opened host-side and restored, a forged
+  one refused, and the lock relocking across a power cycle. Two fuzz targets:
+  `hsm_apdu` replays APDU sequences against a working token, with a model of the
+  lock as its oracle — nothing that needs the device key succeeds while it is
+  closed — and watches every reply for the restored key material in the clear;
+  `hsm_blob` seals whatever it is given under a DKEK it holds, so the backup
+  decoder is reached past its MAC. That found the one fix here: an inconsistent
+  RSA backup ran `rsa_from_ned`'s factoring walk to its 64-attempt end (13 s per
+  input under the fuzzer); a triple that does not carry a message there and back,
+  or a `d` past the modulus, is now refused after two exponentiations.
+  **bcdDevice → 0x09DF.**
 
 ## [0.4.11] - 2026-09-08
 

@@ -434,6 +434,7 @@ fn panel_bench(
         security_trace: None,
         yubico: false,
         power_cut: None,
+        hsm: false,
     };
 
     let (jobs_tx, jobs_rx) = job_queue();

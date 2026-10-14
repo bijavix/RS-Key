@@ -115,6 +115,20 @@ def power_cycle(dev=None, why="this power cycle"):
     return wait_back()
 
 
+def power_cycle_card(why="this power cycle"):
+    """Take a card-only device — the HSM image, which has no FIDO interface to
+    watch — through real power, and return its PC/SC reader once it is back. Any
+    connection the caller held dies with the power."""
+    from _device import find_reader
+
+    if not _emu_power_cycle(why):
+        print(f"\n👉 UNPLUG the key, then plug it straight back in — {why}.")
+        _wait(lambda: find_reader(require_marker=True), False,
+              "the reader is still there — unplug the key when asked")
+        print("   unplugged — plug it back in…")
+    return _wait(lambda: find_reader(require_marker=True), True, "the reader did not come back")
+
+
 def reset(dev=None, why="this authenticatorReset"):
     """Replug the key, then reset it inside the window. Closes `dev` — the caller's
     handle dies with the power cycle — and returns the fresh (dev, cid)."""

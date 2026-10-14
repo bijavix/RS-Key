@@ -180,7 +180,9 @@ fn run_with_wtx(
     }
 }
 
-fn run(jobs: &Jobs, job: Job) -> io::Result<Vec<u8>> {
+/// Hand a job to the device thread and block on its answer: for what streams no
+/// time extension while it waits — this socket's replug, and every `vpcd` message.
+pub(crate) fn run(jobs: &Jobs, job: Job) -> io::Result<Vec<u8>> {
     let (tx, rx) = mpsc::channel();
     jobs.send(job, tx)
         .map_err(|_| io::Error::other("the device thread is gone"))?;

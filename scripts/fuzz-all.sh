@@ -34,9 +34,9 @@ FUZZ_SECONDS="${FUZZ_SECONDS:-120}"
 # $( ) in a `for` word list, so a broken `cargo fuzz list` fuzzed zero targets and
 # the row reported green — measured, rc=0. It needs no margin, unlike the
 # firmware-size ratchet: a target count has no build noise. A literal, not
-# `${FUZZ_TARGET_FLOOR:-53}`, because a floor the environment can lower is not a
+# `${FUZZ_TARGET_FLOOR:-55}`, because a floor the environment can lower is not a
 # floor. Lower all three copies in the commit that removes a target.
-FUZZ_TARGET_FLOOR=53
+FUZZ_TARGET_FLOOR=55
 
 mapfile -t targets < <(cargo fuzz list)
 # The corpus lives in one LRU-evictable cache entry; on a restore miss every

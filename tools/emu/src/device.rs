@@ -22,9 +22,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
-#[cfg(test)]
-use std::sync::mpsc::RecvError;
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, RecvError, Sender, TryRecvError};
 use std::time::Instant;
 
 use rsk_crypto::Device;
@@ -57,6 +55,13 @@ fn openpgp_mfr(yubico: bool) -> u16 {
 #[derive(Clone, Default)]
 pub struct EmuVendorPlatform {
     reboot: Rc<Cell<bool>>,
+}
+
+impl EmuVendorPlatform {
+    /// Whether a warm reboot was queued since the last ask; asking clears it.
+    pub fn take_reboot(&self) -> bool {
+        self.reboot.replace(false)
+    }
 }
 
 impl rsk_vendor::Platform for EmuVendorPlatform {
@@ -124,6 +129,9 @@ pub struct Config {
     /// Cut the power after this many bytes of flash writes — `MockFlashBase`'s
     /// own injector, the same one the `power_cut` fuzz target arms.
     pub power_cut: Option<u32>,
+    /// Run the HSM image's card — `rsk_device::HsmApplets` — instead of the
+    /// security key's applets, as the firmware's `hsm` feature does.
+    pub hsm: bool,
 }
 
 /// One unit of work for the device thread.
@@ -311,10 +319,10 @@ impl JobSource {
         self.rx.try_recv().map(|req| self.took(req))
     }
 
-    /// The next queued job, waiting for one. The device loop uses
-    /// [`Self::try_next`] because it has a panel loop to interleave with; a
-    /// transport's own test has nothing to do between jobs and blocks instead.
-    #[cfg(test)]
+    /// The next queued job, waiting for one. The key's device loop uses
+    /// [`Self::try_next`] because it has a panel loop to interleave with; the HSM
+    /// image's has none, and a transport's own test has nothing to do between
+    /// jobs, so both block instead.
     pub fn next(&self) -> Result<Req, RecvError> {
         self.rx.recv().map(|req| self.took(req))
     }
@@ -381,6 +389,13 @@ pub fn run(
             }
         },
     })));
+
+    // The HSM image shares the store, the DRBG and the presence prompt with the
+    // key, and nothing downstream of them.
+    if cfg.hsm {
+        crate::hsm::serve(cfg, jobs, signals, fs, rng, lines);
+        return;
+    }
 
     // The presence backend is the one thing the two builds disagree about, and it
     // is a *type*, not a value — so the split is here and everything below is
@@ -843,7 +858,7 @@ fn request_record(data: &[u8]) -> crate::security_trace::RequestRecord {
     }
 }
 
-fn hex(b: &[u8]) -> String {
+pub(crate) fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 

@@ -34,6 +34,10 @@ const FACTOR_ATTEMPTS: usize = 64;
 /// λ(n), so walking a random base up to it finds a square root of one that is
 /// not ±1, and that root shares a factor with `n`. `None` for a triple that is
 /// not a two-prime key.
+///
+/// A triple is first made to carry one message there and back: every key does,
+/// and one that does not is refused for two exponentiations where the walk would
+/// spend [`FACTOR_ATTEMPTS`] of them — minutes, at 4096 bits on the device.
 pub fn rsa_from_ned(n: &[u8], e: &[u8], d: &[u8], rng: &mut dyn Rng) -> Option<RsaKey> {
     use num_bigint_dig::prime::probably_prime;
     use num_integer::Integer;
@@ -41,13 +45,18 @@ pub fn rsa_from_ned(n: &[u8], e: &[u8], d: &[u8], rng: &mut dyn Rng) -> Option<R
 
     let n = BigUint::from_bytes_be(n);
     let e = BigUint::from_bytes_be(e);
+    let d = Zeroizing::new(BigUint::from_bytes_be(d));
     let one = BigUint::from(1u8);
     let width = n.bits().div_ceil(8);
-    if width > MAX_RSA_BYTES || n <= BigUint::from(3u8) || n.is_even() {
+    if width > MAX_RSA_BYTES || n <= BigUint::from(3u8) || n.is_even() || *d >= n {
+        return None;
+    }
+    let probe = BigUint::from(2u8);
+    if probe.modpow(&e, &n).modpow(&d, &n) != probe {
         return None;
     }
     // k = d·e − 1 = 2^t · r, r odd.
-    let mut r = Zeroizing::new(BigUint::from_bytes_be(d) * &e);
+    let mut r = Zeroizing::new(&*d * &e);
     if *r <= one {
         return None;
     }

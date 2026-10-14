@@ -426,7 +426,7 @@ release_image_retires_its_unsigned_image_def() {
 # Same floor, and the same reason, as scripts/fuzz-coverage.sh and
 # scripts/fuzz-all.sh: a `for` over an empty word list runs nothing and exits
 # 0. Lower all three in the commit that removes a target.
-FUZZ_TARGET_FLOOR=53
+FUZZ_TARGET_FLOOR=55
 fuzz_targets_are_alive() {
   local manifest log empty bins dead=""
   manifest=$(mktemp)
@@ -572,7 +572,7 @@ run "rustdoc (firmware all-feat)" env BOARD=waveshare-one LED_KIND=none RUSTDOCF
 run "rustdoc (firmware hsm)"   env BOARD=waveshare-one RUSTDOCFLAGS="-D warnings" cargo doc -p firmware --no-deps --features hsm
 run "rustdoc (tui)"            env RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path tools/tui/Cargo.toml --no-deps --target "$HOST"
 run "rustdoc (emu)"            env RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path tools/emu/Cargo.toml --no-deps --target "$HOST"
-# `--bins` is load-bearing: cargo-fuzz writes `doc = false` on all 53 targets, so
+# `--bins` is load-bearing: cargo-fuzz writes `doc = false` on all 55 targets, so
 # a plain `cargo doc` here documents nothing, prints no `Documenting` line and
 # exits 0 in 0.1 s — a green row over an empty set, the defect this block exists
 # to prevent. The flag overrides `doc = false`; `--all-targets` is not a `doc` flag.

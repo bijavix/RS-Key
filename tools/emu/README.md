@@ -4,7 +4,8 @@
 
 The RS-Key applet stack with no hardware under it. It runs the same
 `crates/rsk-*` code a real key runs — FIDO2/U2F, PIV, OpenPGP, OATH, management,
-rescue — and speaks CTAPHID and APDUs over TCP instead of USB.
+rescue — and speaks CTAPHID and APDUs over TCP instead of USB. With `--hsm` it
+runs the HSM image's card instead ([below](#the-hsm-image---hsm---vpcd)).
 
 **It is not a security key.** No secure boot, no OTP root, no fuses, no tamper
 resistance; the seed lives in a file you can read. It exists to run the protocol
@@ -16,8 +17,11 @@ cargo run --manifest-path tools/emu/Cargo.toml --target "$HOST" -- --store ./my.
 
 ```text
   --host <addr>       bind address (default 127.0.0.1)
-  --fido-port <n>     CTAPHID port, 0 disables (default 7799)
+  --fido-port <n>     CTAPHID port, 0 disables (default 7799; none with --hsm)
   --ccid-port <n>     APDU/card port, 0 disables (default 7800)
+  --hsm               run the HSM image's card instead of the key's applets
+  --vpcd [addr]       insert the card in vsmartcard's vpcd reader (default
+                      127.0.0.1:35963), so pcscd and everything on PC/SC see it
   --store <path>      the flash image to mount (default: a blank chip, memory only)
   --touch             ask for every user presence on the terminal
   --auto-touch-ms <n> report presence pending, then approve after n milliseconds
@@ -72,7 +76,7 @@ power-cycle helper at the emulator — so the suites run unmodified, and neither
 hidapi nor pyscard need be installed. `RSK_EMU` / `RSK_EMU_CCID` override the
 addresses.
 
-**42 of the 53 suites pass; the other 10 are refused by name, with the reason,
+**43 of the 54 suites pass; the other 10 are refused by name, with the reason,
 before they start** (exit 77 — so a sweep counts skips apart from failures). None
 of them is an unexplained failure:
 
@@ -87,16 +91,48 @@ of them is an unexplained failure:
 The list lives in `tests/emu.py` (`UNSUPPORTED`); removing an entry is a claim
 that the emulator grew the capability.
 
-`14` is the 43rd: it asserts with a credential a person enrolled
+`14` is the 44th: it asserts with a credential a person enrolled
 (`ssh-keygen -t ed25519-sk`), so without that key it skips 77 too.
 
 `30` needs the Yubico card identity: start the emulator `--yubico` and it runs,
-otherwise the shim asks the card for its ATR and skips. `28` and `76` take `--pin` and want a PIN already set (`21_pin_webauthn` sets
+otherwise the shim asks the card for its ATR and skips. `86` is the HSM image's
+suite: start the emulator `--hsm` and it runs, otherwise the shim asks the card
+for the HSM applet and skips. `28` and `76` take `--pin` and want a PIN already set (`21_pin_webauthn` sets
 `1234`); given both, they pass. Without the flag the shim refuses them by name
 (`NEEDS_ARGS`) rather than letting them die in argparse, so a hand-run sweep reads
 them as not invoked instead of as a device failure. `50` and `52` measure that a
 touch took time, so they only mean
 something with `--touch` and a human at the keyboard.
+
+## The HSM image (`--hsm`, `--vpcd`)
+
+`--hsm` serves the card the firmware's `hsm` feature builds: the vendor, HSM and
+rescue applets behind the same `rsk_device::HsmApplets`, booted by the same
+`hsm_boot`, with no FIDO interface (the FIDO port stays shut). A replug on the card
+socket and a warm reboot both wipe the RAM secrets first, as the board's worker
+does — so an armed HSM comes back locked from either, exactly as on a board.
+
+```bash
+cargo run --manifest-path tools/emu/Cargo.toml --target "$HOST" -- --hsm --store ./hsm.store
+python tests/emu.py tests/86_hsm.py
+```
+
+`--vpcd` puts the card in a PC/SC reader without USB: vsmartcard's `vpcd` driver
+gives `pcscd` a virtual reader that a card connects to over TCP, and the emulator
+connects as that card. Everything on PC/SC then sees it — OpenSC, `pkcs11-tool`,
+`sc-hsm-tool`, `systemd-cryptenroll` — with no kernel module and no root:
+
+```bash
+sudo apt install pcscd vsmartcard-vpcd opensc     # vpcd listens on 35963
+rsk-emu --hsm --store ./hsm.store --vpcd          # the card socket stays up too
+pkcs11-tool --module opensc-pkcs11.so -L
+```
+
+A power transition from the reader is a card reset (it ends the session and
+leaves an unlocked HSM unlocked); the power cycle is still the card socket's
+replug. `--vpcd` serves the key image's card as well, for anything else that
+wants a PC/SC reader. `--usbip` is refused with `--hsm`: it presents the key's
+interfaces.
 
 ## As a real USB device (`--usbip`)
 
