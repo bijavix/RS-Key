@@ -22,8 +22,23 @@ kani-soft = ["rsk-crypto/kani-soft"]
 rsk-sdk = { workspace = true }
 rsk-fs = { workspace = true }
 rsk-crypto = { workspace = true }
+# The EC key type, its signing and its agreement — the same layer the other
+# applets that hold an EC key sign through.
+rsk-ec = { workspace = true }
+# RSA keygen, the CRT blob a key is stored as, and the blinded, fault-checked
+# private operation every signature and decryption runs through.
+rsk-rsa = { workspace = true }
 zeroize = { workspace = true }
 
 [dev-dependencies]
 # RamStorage and the fault-injecting backends the other applet crates test over.
 rsk-fs = { workspace = true, features = ["test-util"] }
+# The PKCS#1 v1.5 verifier a card-made RSA signature is checked against.
+rsk-rsa = { workspace = true, features = ["test-util"] }
+# Independent ECDSA verifiers for the four curves, and the bignum the curve
+# tables and the PSS and raw-RSA checks are recomputed with.
+p256 = { workspace = true }
+p384 = { workspace = true }
+p521 = { workspace = true }
+k256 = { workspace = true }
+num-bigint-dig = { workspace = true }

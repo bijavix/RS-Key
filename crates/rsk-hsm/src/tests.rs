@@ -237,6 +237,175 @@ pub(crate) fn unlock<S: Storage>(app: &mut HsmApplet, fs: &mut Fs<S>, secret: &[
     run(app, fs, CLA_PROPRIETARY, INS_LOCK, LOCK_UNLOCK, 0, &blob).0
 }
 
+// ---- Keys: a device root, request templates, and a verifier of our own ----
+
+/// The stand-in for the rescue applet's device key: a fixed secp256k1 root.
+pub(crate) fn root_key() -> k256::ecdsa::SigningKey {
+    k256::ecdsa::SigningKey::from_bytes(&[0x3C; 32].into()).unwrap()
+}
+
+pub(crate) fn root_point() -> [u8; ROOT_POINT_LEN] {
+    let p = root_key().verifying_key().to_sec1_point(false);
+    p.as_bytes().try_into().unwrap()
+}
+
+/// Provision the device identity under `mkek` with the test root.
+pub(crate) fn provision_with<S: Storage>(fs: &mut Fs<S>, mkek: Option<FusedKey>) -> Result<(), Sw> {
+    use k256::ecdsa::signature::hazmat::PrehashSigner;
+    let fused = read_fused(mkek);
+    let dev = Device {
+        serial_hash: &HASH,
+        serial_id: &SERIAL,
+        otp_key: fused.as_deref(),
+    };
+    let key = root_key();
+    let mut sign = |d: &[u8; 32]| -> Option<[u8; ROOT_SIG_LEN]> {
+        let s: k256::ecdsa::Signature = key.sign_prehash(d).ok()?;
+        s.to_bytes().as_slice().try_into().ok()
+    };
+    provision(&dev, fs, &mut TestRng(9), &root_point(), &mut sign)
+}
+
+/// A fresh, initialized, provisioned device with the user PIN verified.
+pub(crate) fn logged_in<S: Storage>(app: &mut HsmApplet, fs: &mut Fs<S>) {
+    provision_with(fs, None).unwrap();
+    ready(app, fs);
+    assert_eq!(verify(app, fs, PIN), Sw::OK);
+}
+
+/// The request template the driver sends for a key on curve `d`.
+pub(crate) fn ec_template(d: &domain::Domain) -> Vec<u8> {
+    let mut pk = vec![0x06, 10];
+    pk.extend_from_slice(&cvc::SigAlg::EcdsaSha256.oid());
+    for (tag, v) in [
+        (0x81, d.p),
+        (0x82, d.a),
+        (0x83, d.b),
+        (0x84, d.g),
+        (0x85, d.n),
+        (0x87, d.h),
+    ] {
+        pk.push(tag);
+        if v.len() > 127 {
+            pk.push(0x81);
+        }
+        pk.push(v.len() as u8);
+        pk.extend_from_slice(v);
+    }
+    template(&pk)
+}
+
+/// The request template the driver sends for an RSA key of `bits`.
+pub(crate) fn rsa_template(bits: u16) -> Vec<u8> {
+    let mut pk = vec![0x06, 10];
+    pk.extend_from_slice(&cvc::SigAlg::RsaV15Sha256.oid());
+    pk.extend_from_slice(&[0x82, 3, 1, 0, 1, 0x02, 2]);
+    pk.extend_from_slice(&bits.to_be_bytes());
+    template(&pk)
+}
+
+/// `5F29 00, 42 CAR, 7F49 { pk }, 5F20 CHR` — the driver's CAR, our serial's CHR.
+fn template(pk: &[u8]) -> Vec<u8> {
+    let mut t = vec![0x5F, 0x29, 1, 0, 0x42, 9];
+    t.extend_from_slice(b"UTCA00001");
+    t.extend_from_slice(&[0x7F, 0x49]);
+    if pk.len() > 255 {
+        t.extend_from_slice(&[0x82, (pk.len() >> 8) as u8, pk.len() as u8]);
+    } else if pk.len() > 127 {
+        t.extend_from_slice(&[0x81, pk.len() as u8]);
+    } else {
+        t.push(pk.len() as u8);
+    }
+    t.extend_from_slice(pk);
+    let chr = cvc::reference(cvc::MNEMONIC_DEVICE, SERIAL);
+    t.extend_from_slice(&[0x5F, 0x20, chr.len() as u8]);
+    t.extend_from_slice(&chr);
+    t
+}
+
+pub(crate) fn generate<S: Storage>(
+    app: &mut HsmApplet,
+    fs: &mut Fs<S>,
+    kid: u8,
+    tpl: &[u8],
+) -> (Sw, Vec<u8>) {
+    run(app, fs, CLA_ISO, INS_GENERATE_KEYPAIR, kid, 0, tpl)
+}
+
+/// The value of the first `tag` in `data`.
+pub(crate) fn get(data: &[u8], tag: u16) -> &[u8] {
+    rsk_sdk::tlv::find_tag(data, tag).unwrap_or_else(|| panic!("no {tag:#06x}"))
+}
+
+/// Whether raw `r ‖ s` is an ECDSA signature over `digest` by `point`.
+pub(crate) fn ecdsa_verifies(
+    curve: rsk_ec::Curve,
+    point: &[u8],
+    digest: &[u8],
+    raw: &[u8],
+) -> bool {
+    macro_rules! check {
+        ($c:ident) => {{
+            use $c::ecdsa::signature::hazmat::PrehashVerifier;
+            let (Ok(vk), Ok(sig)) = (
+                $c::ecdsa::VerifyingKey::from_sec1_bytes(point),
+                $c::ecdsa::Signature::from_slice(raw),
+            ) else {
+                return false;
+            };
+            vk.verify_prehash(digest, &sig).is_ok()
+        }};
+    }
+    match curve {
+        rsk_ec::Curve::P256 => check!(p256),
+        rsk_ec::Curve::P384 => check!(p384),
+        rsk_ec::Curve::P521 => check!(p521),
+        rsk_ec::Curve::K256 => check!(k256),
+        _ => unreachable!(),
+    }
+}
+
+/// A DER ECDSA signature back to fixed-width `r ‖ s`.
+pub(crate) fn der_to_raw(der: &[u8], width: usize) -> Vec<u8> {
+    assert_eq!(der[0], 0x30);
+    let body = if der[1] == 0x81 { &der[3..] } else { &der[2..] };
+    let mut out = Vec::new();
+    let mut rest = body;
+    for _ in 0..2 {
+        assert_eq!(rest[0], 0x02);
+        let n = rest[1] as usize;
+        let v = &rest[2..2 + n];
+        assert!(
+            v.len() == 1 || v[0] != 0 || v[1] & 0x80 != 0,
+            "minimal INTEGER"
+        );
+        let v = &v[v.iter().position(|&b| b != 0).unwrap_or(v.len())..];
+        out.extend(core::iter::repeat_n(0, width - v.len()));
+        out.extend_from_slice(v);
+        rest = &rest[2 + n..];
+    }
+    assert!(rest.is_empty());
+    out
+}
+
+/// The SHA-256 DigestInfo prefix (RFC 8017 §9.2 note 1), spelt out here rather
+/// than borrowed from the layer whose output it checks.
+pub(crate) const DI_SHA256: [u8; 19] = [
+    0x30, 0x31, 0x30, 0x0D, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
+];
+
+/// `s^65537 mod n`, as wide as `n`: the RSA public operation, recomputed.
+pub(crate) fn rsa_public(n: &[u8], s: &[u8]) -> Vec<u8> {
+    use num_bigint_dig::BigUint;
+    let n_ = BigUint::from_bytes_be(n);
+    let m = BigUint::from_bytes_be(s).modpow(&BigUint::from(65_537u32), &n_);
+    let b = m.to_bytes_be();
+    let mut out = vec![0u8; n.len() - b.len()];
+    out.extend_from_slice(&b);
+    out
+}
+
 fn counters<S: Storage>(fs: &mut Fs<S>) -> records::Counters {
     auth::load_counters(fs).unwrap()
 }

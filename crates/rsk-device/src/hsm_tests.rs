@@ -2,14 +2,13 @@
 // Copyright (C) 2026 RS-Key contributors
 
 use super::*;
-use crate::tests::{Env, VendorBoard, apdu, select, sw};
+use crate::tests::{Env, SERIAL_HASH, SERIAL_ID, TestRng, VendorBoard, apdu, select, sw};
 use rsk_fs::storage::ram::RamStorage;
 use rsk_hsm::HSM_AID;
 use rsk_hsm::consts::*;
-use rsk_sdk::Sw;
 use std::vec::Vec;
 
-type Hsm<'a> = HsmApplets<'a, RamStorage, VendorBoard>;
+type Hsm<'a> = HsmApplets<'a, RamStorage, TestRng, VendorBoard>;
 
 const PIN: &[u8] = b"648219";
 const SO_PIN: [u8; SO_PIN_LEN] = *b"35762188";
@@ -258,4 +257,93 @@ fn the_response_buffer_is_wiped_after_the_hand_off() {
     assert!(n > MAX_CHALLENGE);
     hsm.scrub();
     assert!(hsm.resp.iter().all(|&b| b == 0));
+}
+
+/// The boot pass over `env`'s store, as the HSM image runs it before USB attaches.
+fn boot_env(env: &Env) -> bool {
+    let dev = Device {
+        serial_hash: &SERIAL_HASH,
+        serial_id: &SERIAL_ID,
+        otp_key: None,
+    };
+    let mut fs = env.fs.borrow_mut();
+    let mut rng = env.rng.borrow_mut();
+    boot(&dev, None, &mut fs, &mut *rng)
+}
+
+/// A booted, initialized device with the user PIN verified.
+fn logged_in(env: &Env) -> Hsm<'_> {
+    assert!(boot_env(env));
+    let mut hsm = env.hsm();
+    initialize(&mut hsm);
+    assert_eq!(verify(&mut hsm, PIN), Sw::OK);
+    hsm
+}
+
+/// A GENERATE KEY PAIR template for an RSA-2048 key, as the driver builds one.
+fn rsa_template() -> Vec<u8> {
+    let mut t = std::vec![0x5F, 0x29, 1, 0, 0x42, 9];
+    t.extend_from_slice(b"UTCA00001");
+    t.extend_from_slice(&[0x7F, 0x49, 21, 0x06, 10]);
+    t.extend_from_slice(&[0x04, 0x00, 0x7F, 0x00, 0x07, 0x02, 0x02, 0x02, 0x01, 0x02]);
+    t.extend_from_slice(&[0x82, 3, 1, 0, 1, 0x02, 2, 0x08, 0x00]);
+    t.extend_from_slice(&[0x5F, 0x20, 5]);
+    t.extend_from_slice(b"RSK01");
+    t
+}
+
+/// The device certificates in `2F02`, read the way the driver reads them.
+fn devaut(hsm: &mut Hsm<'_>) -> Vec<u8> {
+    hsm.handle_apdu(&select(HSM_AID));
+    let read = ext(CLA_ISO, INS_READ_BINARY_ODD, 0x2F, 0x02, &[0x54, 2, 0, 0]);
+    let (body, status) = run(hsm, &read);
+    assert_eq!(status, Sw::WARNING_EOF);
+    body
+}
+
+#[test]
+fn the_boot_pass_roots_the_identity_in_the_rescue_device_key() {
+    let env = Env::new();
+    assert!(boot_env(&env));
+    let mut hsm = env.hsm();
+    let first = devaut(&mut hsm);
+    // The second certificate is the root's, and its key is the one the rescue
+    // applet reports as the device attestation key.
+    let mut certs = rsk_sdk::tlv::Tlv::new(&first);
+    let _ = certs.next().unwrap();
+    let (_, root) = certs.next().unwrap();
+    let body = rsk_sdk::tlv::find_tag(root, TAG_CV_BODY).unwrap();
+    let pk = rsk_sdk::tlv::find_tag(body, TAG_CV_PUBKEY).unwrap();
+    let point = rsk_sdk::tlv::find_tag(pk, TAG_PK_POINT).unwrap().to_vec();
+    hsm.handle_apdu(&select(rsk_rescue::RESCUE_AID));
+    let (keydev, status) = run(&mut hsm, &ext(0x80, 0x10, 0x02, 0, &[]));
+    assert_eq!(status, Sw::OK);
+    assert_eq!(point, keydev);
+
+    // A later boot over the same store keeps the same identity.
+    assert!(boot_env(&env));
+    let mut hsm = env.hsm();
+    assert_eq!(devaut(&mut hsm), first);
+}
+
+#[test]
+fn rsa_keygen_runs_on_the_boards_search_when_the_board_has_one() {
+    let env = Env::new();
+    env.board.borrow_mut().accelerator = true;
+    let mut hsm = logged_in(&env);
+    let generate = ext(CLA_ISO, INS_GENERATE_KEYPAIR, 1, 0, &rsa_template());
+    // The double's accelerator ran and found nothing: only the fast path says so.
+    assert_eq!(sw(hsm.handle_apdu(&generate)), Sw::EXEC_ERROR);
+    // A chaining segment is a segment, never a command, fast path or not.
+    let mut seg = generate.clone();
+    seg[0] = 0x10;
+    assert_eq!(sw(hsm.handle_apdu(&seg)), Sw::OK);
+    drop(hsm);
+
+    // With no accelerator the applet searches on its own core.
+    env.board.borrow_mut().accelerator = false;
+    let mut hsm = logged_in(&env);
+    let (resp, status) = run(&mut hsm, &generate);
+    assert_eq!(status, Sw::OK);
+    assert_eq!(resp[0], TAG_CV_AUTH_REQUEST as u8);
 }

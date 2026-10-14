@@ -36,6 +36,7 @@ const INFO_DEV: &[u8] = b"RSK-HSM/DEV";
 const LABEL_PIN: &[u8] = b"RSK-HSM/PIN";
 const LABEL_SO_VERIFIER: &[u8] = b"RSK-HSM/SO";
 const INFO_OBJECT: &[u8] = b"RSK-HSM/OBJECT";
+const INFO_DEVAUT: &[u8] = b"RSK-HSM/DEVAUT";
 
 /// A fixed-size secret that wipes itself when it drops. Every key, unlock secret
 /// and decrypted buffer in this crate is one, so a `?` that leaves a frame early
@@ -231,6 +232,15 @@ pub(crate) fn so_verifier(dev: &Device, so_pin: &[u8]) -> [u8; KEY_LEN] {
     msg[..LABEL_SO_VERIFIER.len()].copy_from_slice(LABEL_SO_VERIFIER);
     msg[LABEL_SO_VERIFIER.len()..n].copy_from_slice(so_pin);
     hmac_sha256(&kbase[..], &msg[..n])
+}
+
+/// The key the device key (`CC00`) is sealed under: the device root's alone,
+/// because that key outlives every owner and every PIN.
+pub(crate) fn device_auth_key(dev: &Device) -> Key {
+    let kbase = Key::new(dev.derive_kbase());
+    let mut k = Key::zeroed();
+    hkdf_sha256(dev.serial_hash, &kbase[..], INFO_DEVAUT, &mut k[..]).expect("32-byte HKDF output");
+    k
 }
 
 /// The key an object at `fid` is sealed under.

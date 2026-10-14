@@ -21,6 +21,9 @@ pub const INS_RESET_RETRY: u8 = 0x2C;
 pub const INS_INITIALIZE: u8 = 0x50;
 pub const INS_KEY_DOMAIN: u8 = 0x52;
 pub const INS_ENUMERATE: u8 = 0x58;
+pub const INS_GENERATE_KEYPAIR: u8 = 0x46;
+pub const INS_DECIPHER: u8 = 0x62;
+pub const INS_SIGN: u8 = 0x68;
 pub const INS_GET_CHALLENGE: u8 = 0x84;
 pub const INS_SELECT: u8 = 0xA4;
 pub const INS_READ_BINARY: u8 = 0xB0;
@@ -121,6 +124,68 @@ pub const KEY_ID_DEVICE: u8 = 0x00;
 /// Most objects the store may hold: ENUMERATE lists every one, two bytes each,
 /// in one response under the CCID frame's body cap.
 pub const MAX_OBJECTS: usize = 1000;
+
+// SIGN and DECIPHER algorithms (P2). The SHA-1 variants of the protocol (`31`,
+// `41`, `71`) are absent on purpose: this firmware hashes no new signature with
+// SHA-1, and a host that insists can still hash it itself and send `20` or `70`.
+/// RSA over a block the host padded.
+pub const ALGO_RSA_RAW: u8 = 0x20;
+/// RSA decryption, answered unpadded: the host strips the padding.
+pub const ALGO_RSA_DECRYPT: u8 = 0x21;
+/// PKCS#1 v1.5 over a DigestInfo the host built.
+pub const ALGO_RSA_PKCS1: u8 = 0x30;
+/// PKCS#1 v1.5 over a digest the device takes of the data.
+pub const ALGO_RSA_PKCS1_SHA256: u8 = 0x33;
+pub const ALGO_RSA_PKCS1_SHA384: u8 = 0x34;
+pub const ALGO_RSA_PKCS1_SHA512: u8 = 0x35;
+/// PSS over a digest the host took; its length names the hash.
+pub const ALGO_RSA_PSS: u8 = 0x40;
+/// PSS over a digest the device takes of the data.
+pub const ALGO_RSA_PSS_SHA256: u8 = 0x43;
+pub const ALGO_RSA_PSS_SHA384: u8 = 0x44;
+pub const ALGO_RSA_PSS_SHA512: u8 = 0x45;
+/// ECDSA over a digest the host took.
+pub const ALGO_EC_RAW: u8 = 0x70;
+/// ECDSA over a digest the device takes of the data.
+pub const ALGO_EC_SHA224: u8 = 0x72;
+pub const ALGO_EC_SHA256: u8 = 0x73;
+pub const ALGO_EC_SHA384: u8 = 0x74;
+pub const ALGO_EC_SHA512: u8 = 0x75;
+/// ECDH, answered as the whole shared point.
+pub const ALGO_EC_DH: u8 = 0x80;
+
+// Card-verifiable certificates (BSI TR-03110): the authenticated request GENERATE
+// KEY PAIR answers, and the device certificate in `2F02`.
+pub const TAG_CV_AUTH_REQUEST: u16 = 0x67;
+pub const TAG_CV_CERT: u16 = 0x7F21;
+pub const TAG_CV_BODY: u16 = 0x7F4E;
+pub const TAG_CV_PROFILE: u16 = 0x5F29;
+pub const TAG_CV_CAR: u16 = 0x42;
+pub const TAG_CV_PUBKEY: u16 = 0x7F49;
+pub const TAG_CV_CHR: u16 = 0x5F20;
+pub const TAG_CV_SIGNATURE: u16 = 0x5F37;
+/// The only certificate profile there is.
+pub const CV_PROFILE: u8 = 0x00;
+/// A certification authority or holder reference: at most 16 characters.
+pub const CV_REF_MAX: usize = 16;
+// The public key's data objects, in the order a body carries them. RSA reuses
+// the first two for the modulus and the public exponent.
+pub const TAG_PK_OID: u16 = 0x06;
+pub const TAG_PK_PRIME: u16 = 0x81;
+pub const TAG_PK_A: u16 = 0x82;
+pub const TAG_PK_B: u16 = 0x83;
+pub const TAG_PK_BASE: u16 = 0x84;
+pub const TAG_PK_ORDER: u16 = 0x85;
+pub const TAG_PK_POINT: u16 = 0x86;
+pub const TAG_PK_COFACTOR: u16 = 0x87;
+/// A request template's RSA modulus size, in bits.
+pub const TAG_PK_MODULUS_BITS: u16 = 0x02;
+// GENERATE KEY PAIR's own objects, after the body's.
+pub const TAG_KEY_USE_COUNTER: u16 = 0x90;
+pub const TAG_KEY_ALGORITHMS: u16 = 0x91;
+pub const TAG_KEY_DOMAIN: u16 = 0x92;
+/// The key domain every key lives in; this build has no other.
+pub const KEY_DOMAIN_DEFAULT: u8 = 0x00;
 
 /// GET CHALLENGE ceiling, the one the driver itself clamps to.
 pub const MAX_CHALLENGE: usize = 1024;

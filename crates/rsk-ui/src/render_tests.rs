@@ -1081,6 +1081,7 @@ const CEREMONY_TITLES: &[&str] = &[
     "Sign audit log?",
     "Sign data?",
     "Sign in?",
+    "Use HSM key?",
     "Use PIV key?",
     "Use this key?",
     "Verify OATH code?",

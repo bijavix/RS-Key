@@ -184,7 +184,7 @@ pub(crate) fn enumerate<S: Storage>(fs: &mut Fs<S>, apdu: &Apdu, res: &mut ResBu
 
 /// Whether one more object may be created: ENUMERATE must always be able to list
 /// them all in one response.
-fn room_for_object<S: Storage>(fs: &mut Fs<S>) -> Result<(), Sw> {
+pub(crate) fn room_for_object<S: Storage>(fs: &mut Fs<S>) -> Result<(), Sw> {
     let live = store::live_objects(fs).ok_or(Sw::MEMORY_FAILURE)?;
     let count: u32 = live.iter().flatten().map(|b| b.count_ones()).sum();
     if (count as usize) < MAX_OBJECTS {

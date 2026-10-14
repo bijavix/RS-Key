@@ -391,6 +391,21 @@ impl PrivKey {
             PrivKey::Ed25519(_) => Err(EcError::Unsupported),
         }
     }
+
+    /// ECDH that answers the whole shared point, uncompressed `04 ‖ x ‖ y`, for
+    /// the protocols that hand the host the point rather than its x-coordinate
+    /// (SmartCard-HSM's DECIPHER). Offered on the four curves the HSM keeps.
+    pub fn ecdh_point(&self, peer_point: &[u8], out: &mut [u8]) -> Result<usize, EcError> {
+        match self {
+            PrivKey::P256(s) => ecdh_point_p256(s, peer_point, out),
+            PrivKey::P384(s) => ecdh_point_p384(s, peer_point, out),
+            PrivKey::P521(s) => ecdh_point_p521(s, peer_point, out),
+            PrivKey::K256(s) => ecdh_point_k256(s, peer_point, out),
+            PrivKey::Bp256(_) | PrivKey::Bp384(_) | PrivKey::Ed25519(_) | PrivKey::X25519(_) => {
+                Err(EcError::Unsupported)
+            }
+        }
+    }
 }
 
 /// P-256 ECDH: peer point parsed as a SEC1 uncompressed point, shared secret =
@@ -444,6 +459,75 @@ fn ecdh_k256(scalar: &[u8; 32], peer_point: &[u8], out: &mut [u8]) -> Result<usi
     let z = shared.raw_secret_bytes();
     out[..z.len()].copy_from_slice(z.as_slice());
     Ok(z.len())
+}
+
+/// P-256 ECDH, the whole shared point. The point is wiped once copied out: it
+/// is the secret itself, not a value derived from it.
+fn ecdh_point_p256(scalar: &[u8; 32], peer: &[u8], out: &mut [u8]) -> Result<usize, EcError> {
+    use p256::elliptic_curve::sec1::ToSec1Point;
+    let sk = p256::SecretKey::from_bytes(&p256::FieldBytes::from(*scalar))
+        .map_err(|_| EcError::Failed)?;
+    let ep = p256::Sec1Point::from_bytes(peer).map_err(|_| EcError::BadPoint)?;
+    let pk = Option::<p256::PublicKey>::from(p256::PublicKey::from_sec1_point(&ep))
+        .ok_or(EcError::BadPoint)?;
+    let mut shared = (pk.to_projective() * *sk.to_nonzero_scalar()).to_affine();
+    let mut pt = shared.to_sec1_point(false);
+    let n = pt.len();
+    out[..n].copy_from_slice(pt.as_bytes());
+    shared.zeroize();
+    pt.zeroize();
+    Ok(n)
+}
+
+/// P-384 ECDH, the whole shared point — as [`ecdh_point_p256`].
+fn ecdh_point_p384(scalar: &[u8; 48], peer: &[u8], out: &mut [u8]) -> Result<usize, EcError> {
+    use p384::elliptic_curve::sec1::ToSec1Point;
+    let sk = p384::SecretKey::from_bytes(&p384::FieldBytes::from(*scalar))
+        .map_err(|_| EcError::Failed)?;
+    let ep = p384::Sec1Point::from_bytes(peer).map_err(|_| EcError::BadPoint)?;
+    let pk = Option::<p384::PublicKey>::from(p384::PublicKey::from_sec1_point(&ep))
+        .ok_or(EcError::BadPoint)?;
+    let mut shared = (pk.to_projective() * *sk.to_nonzero_scalar()).to_affine();
+    let mut pt = shared.to_sec1_point(false);
+    let n = pt.len();
+    out[..n].copy_from_slice(pt.as_bytes());
+    shared.zeroize();
+    pt.zeroize();
+    Ok(n)
+}
+
+/// P-521 ECDH, the whole shared point — as [`ecdh_point_p256`].
+fn ecdh_point_p521(scalar: &[u8; 66], peer: &[u8], out: &mut [u8]) -> Result<usize, EcError> {
+    use p521::elliptic_curve::sec1::ToSec1Point;
+    let sk = p521::SecretKey::from_bytes(&p521::FieldBytes::from(*scalar))
+        .map_err(|_| EcError::Failed)?;
+    let ep = p521::Sec1Point::from_bytes(peer).map_err(|_| EcError::BadPoint)?;
+    let pk = Option::<p521::PublicKey>::from(p521::PublicKey::from_sec1_point(&ep))
+        .ok_or(EcError::BadPoint)?;
+    let mut shared = (pk.to_projective() * *sk.to_nonzero_scalar()).to_affine();
+    let mut pt = shared.to_sec1_point(false);
+    let n = pt.len();
+    out[..n].copy_from_slice(pt.as_bytes());
+    shared.zeroize();
+    pt.zeroize();
+    Ok(n)
+}
+
+/// secp256k1 ECDH, the whole shared point — as [`ecdh_point_p256`].
+fn ecdh_point_k256(scalar: &[u8; 32], peer: &[u8], out: &mut [u8]) -> Result<usize, EcError> {
+    use k256::elliptic_curve::sec1::ToSec1Point;
+    let sk = k256::SecretKey::from_bytes(&k256::FieldBytes::from(*scalar))
+        .map_err(|_| EcError::Failed)?;
+    let ep = k256::Sec1Point::from_bytes(peer).map_err(|_| EcError::BadPoint)?;
+    let pk = Option::<k256::PublicKey>::from(k256::PublicKey::from_sec1_point(&ep))
+        .ok_or(EcError::BadPoint)?;
+    let mut shared = (pk.to_projective() * *sk.to_nonzero_scalar()).to_affine();
+    let mut pt = shared.to_sec1_point(false);
+    let n = pt.len();
+    out[..n].copy_from_slice(pt.as_bytes());
+    shared.zeroize();
+    pt.zeroize();
+    Ok(n)
 }
 
 // brainpoolP256r1 / brainpoolP384r1 (bp256/bp384 0.14, fiat-crypto backend). These

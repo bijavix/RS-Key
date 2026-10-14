@@ -118,7 +118,7 @@ pub trait Hooks<S: rsk_fs::Storage> {
 // is cited by line number, and a declaration up there would move it.
 mod hsm;
 
-pub use hsm::{HsmApplets, UnlockError};
+pub use hsm::{HsmApplets, UnlockError, boot as hsm_boot};
 
 #[cfg(test)]
 mod tests;

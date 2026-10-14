@@ -12,9 +12,16 @@
 mod auth;
 mod channel;
 pub mod consts;
+mod cvc;
+mod devaut;
+mod digest;
 mod dk;
+mod domain;
 mod files;
 mod init;
+mod keygen;
+mod keyops;
+mod keys;
 mod lock;
 mod lockcmd;
 mod records;
@@ -29,6 +36,7 @@ pub use rsk_sdk::{AlwaysConfirm, Presence, Rng, UserPresence};
 use rsk_sdk::{Apdu, Applet, Confirm, ResBuf, Sw};
 
 pub use consts::HSM_AID;
+pub use devaut::{ROOT_POINT_LEN, ROOT_SIG_LEN, RootSign, provision};
 pub use dk::migrate_seal;
 
 use channel::Channel;
@@ -211,13 +219,14 @@ fn expected_cla(ins: u8) -> Option<u8> {
         INS_VERIFY
         | INS_CHANGE_REFERENCE
         | INS_RESET_RETRY
+        | INS_GENERATE_KEYPAIR
         | INS_GET_CHALLENGE
         | INS_SELECT
         | INS_READ_BINARY
         | INS_READ_BINARY_ODD
         | INS_UPDATE_BINARY_ODD
         | INS_DELETE_FILE => CLA_ISO,
-        INS_INITIALIZE | INS_ENUMERATE | INS_LOCK => CLA_PROPRIETARY,
+        INS_INITIALIZE | INS_ENUMERATE | INS_DECIPHER | INS_SIGN | INS_LOCK => CLA_PROPRIETARY,
         _ => return None,
     })
 }
@@ -265,6 +274,9 @@ impl<S: Storage> Applet<Fs<S>> for HsmApplet<'_> {
             INS_CHANGE_REFERENCE => self.change_reference(&dev, fs, apdu),
             INS_RESET_RETRY => self.reset_retry(&dev, fs, apdu),
             INS_INITIALIZE => self.initialize(&dev, fs, apdu),
+            INS_GENERATE_KEYPAIR => self.generate_keypair(&dev, fs, apdu, res),
+            INS_SIGN => self.sign(fs, apdu, res),
+            INS_DECIPHER => self.decipher(fs, apdu, res),
             INS_ENUMERATE => files::enumerate(fs, apdu, res),
             INS_READ_BINARY | INS_READ_BINARY_ODD => self.read_binary(fs, apdu, res),
             INS_UPDATE_BINARY_ODD => self.update_binary(fs, apdu),

@@ -94,8 +94,8 @@ deny = [
     # rsk-bip39, rsk-oath, rsk-otp, rsk-rescue, rsk-slip39. Feature-gating the
     # re-export is worse: no `check.sh` row builds any of those five alone, so a
     # single-crate `cargo clippy -p rsk-oath` could break under a green gate.
-    { crate = "rsk-ec", wrappers = ["rsk-fido", "rsk-openpgp", "rsk-piv"], reason = "R3: the EC layer is reached only by the applets that sign or seal an EC key" },
-    { crate = "rsk-rsa", wrappers = ["firmware", "rsk-device", "rsk-openpgp", "rsk-piv"], reason = "R3: the RSA layer is reached by an allowlisted applet or a composition root" },
+    { crate = "rsk-ec", wrappers = ["rsk-fido", "rsk-hsm", "rsk-openpgp", "rsk-piv"], reason = "R3: the EC layer is reached only by the applets that sign or seal an EC key" },
+    { crate = "rsk-rsa", wrappers = ["firmware", "rsk-device", "rsk-hsm", "rsk-openpgp", "rsk-piv"], reason = "R3: the RSA layer is reached by an allowlisted applet or a composition root" },
 ]
 
 [sources]

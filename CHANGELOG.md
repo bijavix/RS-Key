@@ -60,6 +60,22 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
   links none of it. The design is [docs/hsm-design.md](docs/hsm-design.md). Host
   tests only so far — the image, the emulator and the OpenSC interop land in the
   entries that follow. **bcdDevice → 0x09DB.**
+- **The HSM applet makes and uses asymmetric keys — still in no image.**
+  GENERATE KEY PAIR makes EC keys on P-256, P-384, P-521 and secp256k1 and RSA
+  keys of 2048, 3072 and 4096 bits, and answers each with a CV-certificate
+  request the new key signs and the device key countersigns: the
+  SmartCard-HSM form OpenSC stores, and reads the public key back from. SIGN
+  covers raw RSA, PKCS#1 v1.5, PSS and ECDSA, over a host's digest or one the
+  device takes (SHA-224 to SHA-512 — no SHA-1); DECIPHER covers raw RSA and
+  ECDH, answered as the whole shared point. A key may carry a use counter,
+  spent and persisted before the operation runs, and a list of the algorithms
+  it may serve; INITIALIZE option `0x0100` asks for a touch before every key
+  use. For attestation, the device key (`CC00`, P-256) is minted at boot under
+  the device root and never serves the host, and `2F02` holds its certificate
+  signed by the rescue applet's device attestation key, then that key's own —
+  the chain OpenSC reads the token serial from. `rsk-ec` gains `ecdh_point`,
+  `rsk-crypto` a one-shot SHA-224, and `rsk-device` the HSM boot pass and the
+  dual-core RSA keygen path. **bcdDevice → 0x09DC.**
 
 ## [0.4.11] - 2026-09-08
 

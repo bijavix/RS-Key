@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 RS-Key contributors
 
-//! One-shot SHA-1 / SHA-256 / SHA-384 / SHA-512 helpers.
+//! One-shot SHA-1 / SHA-224 / SHA-256 / SHA-384 / SHA-512 helpers.
 
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha224, Sha256};
 // SHA-384/512 use the Cortex-M33-fast core (byte-identical to sha2::Sha384/512).
 use rsk_sha512::{Sha384, Sha512};
 
@@ -12,6 +12,14 @@ use rsk_sha512::{Sha384, Sha512};
 pub fn sha1(input: &[u8]) -> [u8; 20] {
     let digest = sha1::Sha1::digest(input);
     let mut out = [0u8; 20];
+    out.copy_from_slice(&digest);
+    out
+}
+
+/// One-shot SHA-224 — the HSM's on-card digest for an ECDSA-with-SHA-224 request.
+pub fn sha224(input: &[u8]) -> [u8; 28] {
+    let digest = Sha224::digest(input);
+    let mut out = [0u8; 28];
     out.copy_from_slice(&digest);
     out
 }

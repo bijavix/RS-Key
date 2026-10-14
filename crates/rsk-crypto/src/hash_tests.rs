@@ -26,6 +26,19 @@ fn sha256_vectors() {
 }
 
 #[test]
+fn sha224_vectors() {
+    // FIPS 180-4 examples.
+    assert_eq!(
+        hex(&sha224(b"abc")),
+        "23097d223405d8228642a477bda255b32aadbce4bda0b3f7e36c9da7"
+    );
+    assert_eq!(
+        hex(&sha224(b"")),
+        "d14a028c2a3a2bc9476102bb288234c415a2b01f828ea62ac5b3e42f"
+    );
+}
+
+#[test]
 fn sha1_vectors() {
     // FIPS 180-1 examples.
     assert_eq!(

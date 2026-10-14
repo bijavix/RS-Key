@@ -114,7 +114,7 @@ gap = "the operator-presence gate on every privileged command is modelled (Privi
 [crate.rsk-hsm]
 class = "state-unmodelled"
 planned = "RSKeyHsmLock"
-note = "the HSM image's applet. Security state it holds and no module covers yet: the lock (Disarmed/Locked/Unlocked, rebuilt from the device record each power cycle — its transition table is enumerated in lock_tests.rs), the user/SO retry counters spent before every check, and the initialization record as the commit point of INITIALIZE. Host tests drive each over the fault-injecting media (a cut between appends, a faulted probe, a truncated walk); the planned module is the lock and retry lattice, the same shape RSKeyRetryLattice gives PIV and OpenPGP."
+note = "the HSM image's applet. Security state it holds and no module covers yet: the lock (Disarmed/Locked/Unlocked, rebuilt from the device record each power cycle — its transition table is enumerated in lock_tests.rs), the user/SO retry counters spent before every check, a key's use counter spent before the key runs, and the initialization record as the commit point of INITIALIZE. Host tests drive each over the fault-injecting media (a cut between appends, a faulted probe, a truncated walk); the planned module is the lock and retry lattice, the same shape RSKeyRetryLattice gives PIV and OpenPGP."
 
 [crate.rsk-mgmt]
 class = "state-partial"

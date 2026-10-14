@@ -320,10 +320,11 @@ impl<S: Storage> Env<S> {
 
     /// The HSM image's CCID side: vendor, HSM and rescue behind the dispatcher.
     /// A second call is a power cycle — the same flash, a fresh applet set.
-    pub fn hsm(&self) -> HsmApplets<'_, S, VendorBoard> {
+    pub fn hsm(&self) -> HsmApplets<'_, S, TestRng, VendorBoard> {
         HsmApplets::new(
             &self.fs,
             &self.rng,
+            &self.board,
             &self.finger,
             &self.rescue,
             VendorBoard,

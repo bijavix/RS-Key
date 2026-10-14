@@ -1606,7 +1606,9 @@ name = "rsk-hsm"
 version = "0.1.0"
 dependencies = [
  "rsk-crypto",
+ "rsk-ec",
  "rsk-fs",
+ "rsk-rsa",
  "rsk-sdk",
  "zeroize",
 ]
