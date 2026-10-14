@@ -38,6 +38,29 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
 
 ## [Unreleased]
 
+### Added
+
+- **The HSM applet's core — no image carries it yet.** `crates/rsk-hsm` is the
+  card application of the coming HSM image: a SmartCard-HSM-compatible APDU
+  subset, so OpenSC's built-in `sc-hsm` driver serves it as a PKCS#11 token with
+  no driver of ours. This step is the file system the driver reads (SELECT, READ
+  and UPDATE BINARY, DELETE FILE, ENUMERATE OBJECTS, and an EF.TokenInfo the
+  device writes itself around the host's label), INITIALIZE, and the user PIN and
+  SO-PIN, each with a retry counter that is spent and persisted before the PIN is
+  checked. Key objects and PIN-protected data are sealed under a master key only
+  the user PIN opens, and that envelope sits behind a device key rooted in the
+  device root — so once the OTP master key is provisioned, a flash dump offers
+  no offline PIN oracle without the fused key. The lock is the other half: an
+  armed device keeps that device key sealed to a 32-byte secret the owner holds,
+  delivered over an ephemeral P-256 channel, and every power cycle closes it
+  again; arming and disarming take the SO-PIN and a touch, and re-initializing
+  with the SO-PIN wipes and disarms. `rsk-device` gains `HsmApplets`, the HSM
+  image's CCID wiring — the vendor, HSM and rescue applets behind one dispatcher
+  — with the door a board-side unlock factor will use; the security-key image
+  links none of it. The design is [docs/hsm-design.md](docs/hsm-design.md). Host
+  tests only so far — the image, the emulator and the OpenSC interop land in the
+  entries that follow. **bcdDevice → 0x09DB.**
+
 ## [0.4.11] - 2026-09-08
 
 The catch-up release, and the one where the instruments were audited harder than

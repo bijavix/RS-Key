@@ -1482,6 +1482,7 @@ dependencies = [
  "rsk-devconf",
  "rsk-fido",
  "rsk-fs",
+ "rsk-hsm",
  "rsk-mgmt",
  "rsk-oath",
  "rsk-openpgp",
@@ -1598,6 +1599,16 @@ version = "0.1.0"
 dependencies = [
  "heapless 0.8.0",
  "rsk-sdk",
+]
+
+[[package]]
+name = "rsk-hsm"
+version = "0.1.0"
+dependencies = [
+ "rsk-crypto",
+ "rsk-fs",
+ "rsk-sdk",
+ "zeroize",
 ]
 
 [[package]]

@@ -318,6 +318,24 @@ impl<S: Storage> Env<S> {
         )
     }
 
+    /// The HSM image's CCID side: vendor, HSM and rescue behind the dispatcher.
+    /// A second call is a power cycle — the same flash, a fresh applet set.
+    pub fn hsm(&self) -> HsmApplets<'_, S, VendorBoard> {
+        HsmApplets::new(
+            &self.fs,
+            &self.rng,
+            &self.finger,
+            &self.rescue,
+            VendorBoard,
+            SERIAL_ID,
+            SERIAL_HASH,
+            None,
+            None,
+            KV_TOTAL,
+            FLASH_SIZE,
+        )
+    }
+
     /// The CTAPHID side: FIDO/U2F plus the vendor AID.
     pub fn ctap(&self) -> AppletHandler<'_, S, TestRng, VendorBoard> {
         AppletHandler::new(

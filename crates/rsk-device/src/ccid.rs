@@ -28,7 +28,7 @@ use crate::Hooks;
 // header = 2038 payload bytes. The applet response (body + 2-byte SW) must fit
 // one frame; sizing this to the full message let a large response (e.g. a long
 // OATH LIST) overrun the frame, and `run_xfr` silently dropped the tail incl. SW.
-const RESP_CAP: usize = 2038;
+pub(crate) const RESP_CAP: usize = 2038;
 const _: () = assert!(RESP_CAP == rsk_usb::ccid::MAX_CCID_MSG - rsk_usb::ccid::HEADER);
 
 // The frame is also the largest command APDU that ever reaches an applet, and

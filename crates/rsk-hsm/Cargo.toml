@@ -1,0 +1,29 @@
+[package]
+name = "rsk-hsm"
+version = "0.1.0"
+license = "AGPL-3.0-only"
+edition = "2024"
+publish = false
+
+# The HSM applet of the HSM image: a SmartCard-HSM-compatible APDU subset, so
+# OpenSC's built-in `sc-hsm` driver serves it over PKCS#11 with no driver of our
+# own. Pure and host-testable like the other applet crates.
+# `cfg(kani)` guards the proof harnesses (set by `cargo kani`, unknown to rustc).
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
+
+[features]
+# `scripts/kani.sh` only: forwards to the dependency that carries the switch.
+# What it buys, and why the firmware must never turn it on, is in
+# `crates/rsk-crypto/Cargo.toml`.
+kani-soft = ["rsk-crypto/kani-soft"]
+
+[dependencies]
+rsk-sdk = { workspace = true }
+rsk-fs = { workspace = true }
+rsk-crypto = { workspace = true }
+zeroize = { workspace = true }
+
+[dev-dependencies]
+# RamStorage and the fault-injecting backends the other applet crates test over.
+rsk-fs = { workspace = true, features = ["test-util"] }

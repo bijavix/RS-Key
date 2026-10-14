@@ -22,8 +22,8 @@
 #
 # Scope, matching the roadmap's §3.4 so the counts reproduce: callers outside
 # `crates/rsk-fs` (which defines the family), outside `fuzz/`, and outside the
-# cfg-gated `*_tests.rs` / `*_kani.rs` sources. That leaves 43 — 24 `delete`,
-# 9 `delete_key`, 5 `force_delete`, 5 `force_delete_halves`.
+# cfg-gated `*_tests.rs` / `*_kani.rs` sources. That leaves 47 — 26 `delete`,
+# 10 `delete_key`, 5 `force_delete`, 6 `force_delete_halves`.
 #
 # Run the same derivation over `crates/rsk-fs` and it finds FIVE more, which this
 # header used to call "the one" — a hand-written count in the header of the file
@@ -288,6 +288,39 @@ class = "secret-or-gate"
 metadata = "none"
 disposition = "must-read"
 why = "BACKUP_LOAD drops the old certificate BEFORE the new seed commits: a survivor is a cert over a superseded key that matches_template would accept forever (audit run-32)."
+
+[[site]]
+file = "crates/rsk-hsm/src/files.rs"
+line = 427
+call = "None => fs.delete(store::REC_LABEL),"
+verb = "delete"
+answer = "read"
+class = "bookkeeping"
+metadata = "none"
+disposition = "must-read"
+why = "a host TokenInfo that names no label puts the default one back. The label is public and a survivor only keeps the old name on the token, but the write it answers is UPDATE BINARY's, and that one reports what the store did."
+
+[[site]]
+file = "crates/rsk-hsm/src/files.rs"
+line = 504
+call = "fs.delete(file.store()).map_err(|_| Sw::MEMORY_FAILURE)?;"
+verb = "delete"
+answer = "read"
+class = "secret-or-gate"
+metadata = "none"
+disposition = "must-read"
+why = "DELETE FILE's only effect, and the fid can be a sealed key object: a removal the medium refused must not answer 9000 over a key that stays usable behind the PIN. The at-rest lap is re-armed just above it, best-effort, for the superseded copy."
+
+[[site]]
+file = "crates/rsk-hsm/src/store.rs"
+line = 191
+call = "let gone = fs.force_delete_halves(fid);"
+verb = "force_delete_halves"
+answer = "read"
+class = "wipe-sweep"
+metadata = "none"
+disposition = "must-read"
+why = "the re-initialization sweep over the HSM's whole range. A refused removal stops it — `for_each_key` would re-yield the fid — and fails the INITIALIZE before a new PIN is written over keys still in flash; a metadata drop that cannot be proven is carried to the end of the range and then fails it, so one faulted EF_META read cannot stop the wipe at the same fid on every retry. The initialization record that makes the new state real is written only after the sweep answered Ok."
 
 [[site]]
 file = "crates/rsk-oath/src/lib.rs"

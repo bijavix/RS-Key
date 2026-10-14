@@ -46,7 +46,7 @@ multiple-versions = "warn"
 # of them adds is its own binary — a composition root by construction, and
 # allowed to reach anything.
 deny = [
-    # R2 — an applet never reaches sideways. The eight applets are composed by
+    # R2 — an applet never reaches sideways. The nine applets are composed by
     # the two device wirings and the firmware binary, and by nothing else. Six
     # such edges stood before the tier refactor (fido→mgmt, fido→rescue,
     # openpgp→mgmt, piv→mgmt, piv→openpgp, otp→mgmt); the machinery under each
@@ -61,6 +61,7 @@ deny = [
     # so its wrapper list is two, not three.
     { crate = "rsk-rescue", wrappers = ["firmware", "rsk-device"], reason = "R2: an applet is composed by a device wiring, never named by another applet" },
     { crate = "rsk-vendor", wrappers = ["firmware", "rsk-device", "rsk-display"], reason = "R2: an applet is composed by a device wiring, never named by another applet" },
+    { crate = "rsk-hsm", wrappers = ["rsk-device"], reason = "R2: an applet is composed by a device wiring, never named by another applet" },
 
     # R3 — the crypto facade. No applet declares one of the four hash/signature
     # backends below: `rsk-crypto` is the only crate of ours that does, bar two

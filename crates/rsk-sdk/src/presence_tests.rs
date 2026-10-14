@@ -90,6 +90,7 @@ const ASK_CENSUS: &[(&str, usize, usize)] = &[
     ("crates/rsk-fido/src/lib.rs", 2, 0),
     ("crates/rsk-fido/src/reset.rs", 1, 0),
     ("crates/rsk-fido/src/selection.rs", 1, 0),
+    ("crates/rsk-hsm/src/lib.rs", 0, 1),
     ("crates/rsk-mgmt/src/lib.rs", 0, 1),
     ("crates/rsk-oath/src/lib.rs", 0, 3),
     ("crates/rsk-openpgp/src/lib.rs", 0, 1),

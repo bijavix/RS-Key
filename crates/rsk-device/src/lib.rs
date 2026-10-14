@@ -114,5 +114,11 @@ pub trait Hooks<S: rsk_fs::Storage> {
 // supertraits stood here only to reconcile one byte-identical declaration per
 // applet; the declarations moved into `rsk-sdk`, so the glue went with them.
 
+// The HSM image's wiring. Declared here rather than beside `ccid`: the text above
+// is cited by line number, and a declaration up there would move it.
+mod hsm;
+
+pub use hsm::{HsmApplets, UnlockError};
+
 #[cfg(test)]
 mod tests;

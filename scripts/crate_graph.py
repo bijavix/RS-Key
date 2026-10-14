@@ -76,6 +76,7 @@ TIERS = [
             "rsk-mgmt",
             "rsk-rescue",
             "rsk-vendor",
+            "rsk-hsm",
         ],
     ),
     (

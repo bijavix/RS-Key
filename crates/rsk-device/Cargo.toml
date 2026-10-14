@@ -27,6 +27,9 @@ rsk-phy = { workspace = true }
 rsk-piv = { workspace = true }
 rsk-rescue = { workspace = true }
 rsk-vendor = { workspace = true }
+# The HSM image's applet, wired by `HsmApplets`. Not behind a feature: the key
+# image never names that type, so nothing of the applet reaches its binary.
+rsk-hsm = { workspace = true }
 # `RsaKey` names the result of the keygen hook — the dual-core prime search the
 # firmware runs in place of the applet's own. A composition root may reach an
 # algorithm crate directly, and this one did before (via `rsa`); going through
