@@ -125,6 +125,7 @@ CLAIM_RUNNERS=(
   "scripts/fuzz-coverage.sh|-|measures the weekly job's accumulated corpus cache, which no checkout carries"
   "scripts/usbip-suites.sh|-|needs a Linux host with vhci_hcd and KVM to boot the guest that owns the USB stack"
   "scripts/usbip-guest.sh|-|the in-guest half of the same suite, invoked by it and never directly"
+  "scripts/hsm-interop.sh|-|needs pcscd with vsmartcard's vpcd reader, OpenSC, GnuTLS and LUKS tooling on the host — a PC/SC stack no checkout carries"
   "scripts/pt.sh|-|applies a partition table to an ELF; a build step the gate's image rows invoke, not evidence of its own"
   "scripts/metrics.sh|-|advisory refactor reconnaissance, explicitly not a gate and nothing depends on its numbers"
   "scripts/pages/build-site.sh|-|renders the published docs site for GitHub Pages; the docs phase builds and link-checks the same book"

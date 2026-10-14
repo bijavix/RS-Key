@@ -72,3 +72,26 @@ Other platforms (move the two keys there and re-run the same three commands):
 - **Windows** — no nix: `pip install ykman pyscard hidapi cryptography`, then run
   `python tests\interop\capture.py …`. PIV/WebAuthn ride the OS minidriver /
   Windows Hello; those are the GUI stage, out of scope for this read-only sweep.
+
+## The HSM image
+
+`hsm.py` is the HSM image's consumer sweep, and unlike `run.py` it writes: it
+initializes the token (`--wipe` for one already initialized), so point it at an
+HSM you mean to erase. Each result is checked by another tool than the one that
+made it — `sc-hsm-tool` (initialize, a DKEK share, wrap → delete → unwrap),
+`pkcs11-tool` (EC and RSA keygen, `--test`, ECDSA, ECDH, RSA sign and decrypt,
+all checked by OpenSSL), `rsk hsm attest`, GnuTLS `certtool`/`p11tool` (a
+certificate self-signed on the token, verified by OpenSSL), and LUKS
+(`systemd-cryptenroll` binds a keyslot, `cryptsetup`'s token plugin opens it,
+and refuses to while the HSM's lock is closed).
+
+```sh
+python tests/interop/hsm.py --wipe                  # a board in reader 0
+HOST_TARGET=x86_64-unknown-linux-gnu ./scripts/hsm-interop.sh   # no board
+```
+
+`scripts/hsm-interop.sh` builds `tools/emu`, inserts its `--hsm` card in
+vsmartcard's `vpcd` reader and runs `tests/86_hsm.py` and this sweep against it.
+It needs `pcscd` with `vsmartcard-vpcd`, OpenSC, and for the LUKS steps
+`cryptsetup`, `systemd-cryptenroll`, GnuTLS and root; a missing tool skips its
+steps. On a board the lock step asks for an unplug and two touches.
