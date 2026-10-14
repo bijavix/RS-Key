@@ -130,3 +130,19 @@ fn object_keys_are_per_fid() {
     assert_ne!(*object_key(&K, 0xA101), *object_key(&K, 0xA102));
     assert_ne!(*object_key(&K, 0xA101), *object_key(&[8; KEY_LEN], 0xA101));
 }
+
+#[test]
+fn the_dkek_key_is_its_own_role() {
+    let fid = crate::store::REC_DKEK.get();
+    assert_ne!(
+        *dkek_key(&K, fid),
+        *dkek_key(&[8; KEY_LEN], fid),
+        "keyed by DK"
+    );
+    assert_ne!(
+        *dkek_key(&K, fid),
+        *object_key(&K, fid),
+        "not an object key"
+    );
+    assert_eq!(*dkek_key(&K, fid), *dkek_key(&K, fid));
+}

@@ -37,6 +37,7 @@ const LABEL_PIN: &[u8] = b"RSK-HSM/PIN";
 const LABEL_SO_VERIFIER: &[u8] = b"RSK-HSM/SO";
 const INFO_OBJECT: &[u8] = b"RSK-HSM/OBJECT";
 const INFO_DEVAUT: &[u8] = b"RSK-HSM/DEVAUT";
+const INFO_DKEK: &[u8] = b"RSK-HSM/DKEK";
 
 /// A fixed-size secret that wipes itself when it drops. Every key, unlock secret
 /// and decrypted buffer in this crate is one, so a `?` that leaves a frame early
@@ -247,6 +248,14 @@ pub(crate) fn device_auth_key(dev: &Device) -> Key {
 pub(crate) fn object_key(hmk: &[u8; KEY_LEN], fid: u16) -> Key {
     let mut k = Key::zeroed();
     hkdf_sha256(&fid.to_be_bytes(), hmk, INFO_OBJECT, &mut k[..]).expect("32-byte HKDF output");
+    k
+}
+
+/// The key the DKEK record at `fid` is sealed under: keyed by DK rather than
+/// HMK, because the driver's tool imports shares before anyone has logged in.
+pub(crate) fn dkek_key(dk: &[u8; KEY_LEN], fid: u16) -> Key {
+    let mut k = Key::zeroed();
+    hkdf_sha256(&fid.to_be_bytes(), dk, INFO_DKEK, &mut k[..]).expect("32-byte HKDF output");
     k
 }
 

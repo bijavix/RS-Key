@@ -25,6 +25,66 @@ pub fn rsa_from_pqe(e: &[u8], p: &[u8], q: &[u8]) -> Option<RsaKey> {
     )
 }
 
+/// How many random bases [`rsa_from_ned`] tries. Each succeeds with probability
+/// at least one half, so running out means the triple is not a key.
+const FACTOR_ATTEMPTS: usize = 64;
+
+/// Rebuild a key that travelled as `n`, `e` and `d` alone, recovering its two
+/// primes as NIST SP 800-56B Rev. 2 Appendix C.2 does: `d·e − 1` is a multiple of
+/// λ(n), so walking a random base up to it finds a square root of one that is
+/// not ±1, and that root shares a factor with `n`. `None` for a triple that is
+/// not a two-prime key.
+pub fn rsa_from_ned(n: &[u8], e: &[u8], d: &[u8], rng: &mut dyn Rng) -> Option<RsaKey> {
+    use num_bigint_dig::prime::probably_prime;
+    use num_integer::Integer;
+    use zeroize::Zeroizing;
+
+    let n = BigUint::from_bytes_be(n);
+    let e = BigUint::from_bytes_be(e);
+    let one = BigUint::from(1u8);
+    let width = n.bits().div_ceil(8);
+    if width > MAX_RSA_BYTES || n <= BigUint::from(3u8) || n.is_even() {
+        return None;
+    }
+    // k = d·e − 1 = 2^t · r, r odd.
+    let mut r = Zeroizing::new(BigUint::from_bytes_be(d) * &e);
+    if *r <= one {
+        return None;
+    }
+    *r -= &one;
+    let mut t = 0usize;
+    while r.is_even() {
+        *r >>= 1;
+        t += 1;
+    }
+    let minus_one = &n - &one;
+    let mut seed = Zeroizing::new([0u8; MAX_RSA_BYTES]);
+    for _ in 0..FACTOR_ATTEMPTS {
+        rng.fill(&mut seed[..width]);
+        let g = BigUint::from_bytes_be(&seed[..width]) % &n;
+        if g <= one || g == minus_one {
+            continue;
+        }
+        let mut x = Zeroizing::new(g.modpow(&r, &n));
+        for _ in 0..t {
+            if *x == one || *x == minus_one {
+                break;
+            }
+            let y = Zeroizing::new((&*x * &*x) % &n);
+            if *y == one {
+                let p = Zeroizing::new((&*x - &one).gcd(&n));
+                let q = Zeroizing::new(&n / &*p);
+                if !probably_prime(&p, 0) || !probably_prime(&q, 0) {
+                    return None;
+                }
+                return RsaKey::from_p_q((*p).clone(), (*q).clone(), e);
+            }
+            x = y;
+        }
+    }
+    None
+}
+
 /// The RSA prime search as a *stepper*, so the CCID transport can yield — and
 /// send time-extension keepalives — between candidates. Each
 /// [`step`](RsaKeygen::step) tests ONE random candidate (a bounded chunk: one

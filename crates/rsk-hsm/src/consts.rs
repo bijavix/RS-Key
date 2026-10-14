@@ -22,8 +22,12 @@ pub const INS_INITIALIZE: u8 = 0x50;
 pub const INS_KEY_DOMAIN: u8 = 0x52;
 pub const INS_ENUMERATE: u8 = 0x58;
 pub const INS_GENERATE_KEYPAIR: u8 = 0x46;
+pub const INS_GENERATE_SYMMETRIC: u8 = 0x48;
 pub const INS_DECIPHER: u8 = 0x62;
 pub const INS_SIGN: u8 = 0x68;
+pub const INS_WRAP_KEY: u8 = 0x72;
+pub const INS_UNWRAP_KEY: u8 = 0x74;
+pub const INS_CIPHER_SYMMETRIC: u8 = 0x78;
 pub const INS_GET_CHALLENGE: u8 = 0x84;
 pub const INS_SELECT: u8 = 0xA4;
 pub const INS_READ_BINARY: u8 = 0xB0;
@@ -153,6 +157,31 @@ pub const ALGO_EC_SHA384: u8 = 0x74;
 pub const ALGO_EC_SHA512: u8 = 0x75;
 /// ECDH, answered as the whole shared point.
 pub const ALGO_EC_DH: u8 = 0x80;
+// CIPHER SYMMETRIC algorithms (P2): AES-CBC with a zero IV and no padding — the
+// host chains or randomises as it sees fit — and AES-CMAC.
+pub const ALGO_AES_CBC_ENCRYPT: u8 = 0x10;
+pub const ALGO_AES_CBC_DECRYPT: u8 = 0x11;
+pub const ALGO_AES_CMAC: u8 = 0x18;
+/// Not an operation but a permission: a key whose own list leaves this out can
+/// never leave the device, not even wrapped. An empty list allows it.
+pub const ALGO_WRAP: u8 = 0x92;
+
+// GENERATE SYMMETRIC KEY's P2: the AES key size. The protocol's `B3`, a 512-bit
+// key for XTS, has no operation here and is refused.
+pub const AES_128: u8 = 0xB0;
+pub const AES_192: u8 = 0xB1;
+pub const AES_256: u8 = 0xB2;
+
+/// WRAP KEY's P2: under the key domain's DKEK.
+pub const WRAP_WITH_DKEK: u8 = 0x92;
+/// UNWRAP KEY's P2: the blob is in the staging file.
+pub const UNWRAP_FROM_STAGING: u8 = 0x93;
+/// MANAGE KEY DOMAIN's only P1 here: status, or the import of one DKEK share.
+pub const KEY_DOMAIN_DKEK: u8 = 0x00;
+/// One DKEK share, and the DKEK they combine into.
+pub const DKEK_SHARE_LEN: usize = 32;
+/// A DKEK's key check value: the first bytes of its SHA-256.
+pub const DKEK_KCV_LEN: usize = 8;
 
 // Card-verifiable certificates (BSI TR-03110): the authenticated request GENERATE
 // KEY PAIR answers, and the device certificate in `2F02`.

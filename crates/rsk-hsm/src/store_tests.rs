@@ -38,6 +38,7 @@ fn no_record_lands_on_a_fid_the_rest_of_the_tree_owns() {
         REC_COUNTERS,
         REC_DEV.get(),
         REC_USER.get(),
+        REC_DKEK.get(),
         REC_LABEL,
         REC_DEVAUT,
         REC_STAGING,

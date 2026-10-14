@@ -23,6 +23,8 @@ pub(crate) const REC_COUNTERS: u16 = 0xA002;
 pub(crate) const REC_DEV: KeyFid = KeyFid::new(0xA003);
 /// The user's sealed copy of HMK.
 pub(crate) const REC_USER: KeyFid = KeyFid::new(0xA004);
+/// The default key domain's DKEK, or the shares of it imported so far.
+pub(crate) const REC_DKEK: KeyFid = KeyFid::new(0xA005);
 /// The token label EF.TokenInfo is synthesized around.
 pub(crate) const REC_LABEL: u16 = 0xA006;
 /// The device certificate chain (`2F02`).

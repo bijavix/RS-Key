@@ -56,11 +56,39 @@ impl RsaSize {
     }
 }
 
+/// The AES sizes, by key length in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AesSize {
+    A128,
+    A192,
+    A256,
+}
+
+impl AesSize {
+    pub(crate) fn from_len(len: usize) -> Option<AesSize> {
+        Some(match len {
+            16 => AesSize::A128,
+            24 => AesSize::A192,
+            32 => AesSize::A256,
+            _ => return None,
+        })
+    }
+
+    pub(crate) const fn len(self) -> usize {
+        match self {
+            AesSize::A128 => 16,
+            AesSize::A192 => 24,
+            AesSize::A256 => 32,
+        }
+    }
+}
+
 /// What a key object holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum KeyType {
     Ec(&'static Domain),
     Rsa(RsaSize),
+    Aes(AesSize),
 }
 
 impl KeyType {
@@ -68,11 +96,16 @@ impl KeyType {
         match self {
             KeyType::Ec(d) => d.field_len(),
             KeyType::Rsa(s) => s.material_len(),
+            KeyType::Aes(s) => s.len(),
         }
     }
 
-    /// Whether SIGN or DECIPHER algorithm `algo` is one this kind of key does.
+    /// Whether `algo` is one this kind of key does: a SIGN, DECIPHER or CIPHER
+    /// SYMMETRIC algorithm of its family, or the wrap permission any key may hold.
     pub(crate) fn serves(self, algo: u8) -> bool {
+        if algo == ALGO_WRAP {
+            return true;
+        }
         match self {
             KeyType::Ec(_) => matches!(
                 algo,
@@ -96,6 +129,10 @@ impl KeyType {
                     | ALGO_RSA_PSS_SHA384
                     | ALGO_RSA_PSS_SHA512
             ),
+            KeyType::Aes(_) => matches!(
+                algo,
+                ALGO_AES_CBC_ENCRYPT | ALGO_AES_CBC_DECRYPT | ALGO_AES_CMAC
+            ),
         }
     }
 }
@@ -108,6 +145,7 @@ pub(crate) const COUNTER_UNLIMITED: u32 = u32::MAX;
 const VERSION: u8 = 1;
 const KIND_EC: u8 = 1;
 const KIND_RSA: u8 = 2;
+const KIND_AES: u8 = 3;
 /// `ver ‖ kind ‖ param(2) ‖ counter(4) ‖ n`, then the list and the material.
 const HEADER_LEN: usize = 9;
 const MATERIAL_MAX: usize = MAX_CRT_PLAIN;
@@ -142,9 +180,14 @@ impl KeyObject {
         Some(k)
     }
 
-    /// The private material: an EC scalar, or the RSA CRT blob.
+    /// The private material: an EC scalar, the RSA CRT blob, or the AES key.
     pub(crate) fn material(&self) -> &[u8] {
         &self.material[..self.ty.material_len()]
+    }
+
+    /// The key's own algorithm list; empty when it has none.
+    pub(crate) fn algos(&self) -> &[u8] {
+        &self.algos[..self.nalgos]
     }
 
     /// Whether the key's own list admits `algo`. No list admits everything the
@@ -157,6 +200,7 @@ impl KeyObject {
         let (kind, param) = match self.ty {
             KeyType::Ec(d) => (KIND_EC, d.curve.id() as u16),
             KeyType::Rsa(s) => (KIND_RSA, s.bits() as u16),
+            KeyType::Aes(s) => (KIND_AES, s.len() as u16),
         };
         out[0] = VERSION;
         out[1] = kind;
@@ -179,6 +223,7 @@ impl KeyObject {
         let ty = match b[1] {
             KIND_EC => KeyType::Ec(domain::of(Curve::from_id(u8::try_from(param).ok()?)?)?),
             KIND_RSA => KeyType::Rsa(RsaSize::from_bits(param as usize)?),
+            KIND_AES => KeyType::Aes(AesSize::from_len(param as usize)?),
             _ => return None,
         };
         let counter = u32::from_be_bytes([b[4], b[5], b[6], b[7]]);

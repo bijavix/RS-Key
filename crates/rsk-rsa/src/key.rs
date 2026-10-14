@@ -126,6 +126,12 @@ impl RsaKey {
         self.e.to_bytes_be()
     }
 
+    /// The private exponent, big-endian, minimal width — the form a key backup
+    /// carries the key in when it leaves without its CRT parameters.
+    pub fn d_be(&self) -> Zeroizing<Vec<u8>> {
+        Zeroizing::new(self.d.to_bytes_be())
+    }
+
     pub(crate) fn n(&self) -> &BigUint {
         &self.n
     }

@@ -11,11 +11,13 @@
 
 mod auth;
 mod channel;
+mod cmac;
 pub mod consts;
 mod cvc;
 mod devaut;
 mod digest;
 mod dk;
+mod dkek;
 mod domain;
 mod files;
 mod init;
@@ -27,6 +29,8 @@ mod lockcmd;
 mod records;
 mod seal;
 mod store;
+mod symmetric;
+mod wrap;
 
 use core::cell::RefCell;
 
@@ -220,13 +224,15 @@ fn expected_cla(ins: u8) -> Option<u8> {
         | INS_CHANGE_REFERENCE
         | INS_RESET_RETRY
         | INS_GENERATE_KEYPAIR
+        | INS_GENERATE_SYMMETRIC
         | INS_GET_CHALLENGE
         | INS_SELECT
         | INS_READ_BINARY
         | INS_READ_BINARY_ODD
         | INS_UPDATE_BINARY_ODD
         | INS_DELETE_FILE => CLA_ISO,
-        INS_INITIALIZE | INS_ENUMERATE | INS_DECIPHER | INS_SIGN | INS_LOCK => CLA_PROPRIETARY,
+        INS_INITIALIZE | INS_KEY_DOMAIN | INS_ENUMERATE | INS_DECIPHER | INS_SIGN
+        | INS_WRAP_KEY | INS_UNWRAP_KEY | INS_CIPHER_SYMMETRIC | INS_LOCK => CLA_PROPRIETARY,
         _ => return None,
     })
 }
@@ -275,8 +281,13 @@ impl<S: Storage> Applet<Fs<S>> for HsmApplet<'_> {
             INS_RESET_RETRY => self.reset_retry(&dev, fs, apdu),
             INS_INITIALIZE => self.initialize(&dev, fs, apdu),
             INS_GENERATE_KEYPAIR => self.generate_keypair(&dev, fs, apdu, res),
+            INS_GENERATE_SYMMETRIC => self.generate_symmetric(fs, apdu),
             INS_SIGN => self.sign(fs, apdu, res),
             INS_DECIPHER => self.decipher(fs, apdu, res),
+            INS_CIPHER_SYMMETRIC => self.cipher_symmetric(fs, apdu, res),
+            INS_KEY_DOMAIN => self.key_domain(&dev, fs, apdu, res),
+            INS_WRAP_KEY => self.wrap_key(&dev, fs, apdu, res),
+            INS_UNWRAP_KEY => self.unwrap_key(&dev, fs, apdu),
             INS_ENUMERATE => files::enumerate(fs, apdu, res),
             INS_READ_BINARY | INS_READ_BINARY_ODD => self.read_binary(fs, apdu, res),
             INS_UPDATE_BINARY_ODD => self.update_binary(fs, apdu),

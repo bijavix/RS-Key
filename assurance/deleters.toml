@@ -313,7 +313,7 @@ why = "DELETE FILE's only effect, and the fid can be a sealed key object: a remo
 
 [[site]]
 file = "crates/rsk-hsm/src/store.rs"
-line = 191
+line = 193
 call = "let gone = fs.force_delete_halves(fid);"
 verb = "force_delete_halves"
 answer = "read"

@@ -8,6 +8,9 @@
 //! The initialization record is written last and is what "initialized" means, so
 //! a power cut part-way leaves either the old device (the SO can run it again) or
 //! one that reads as never initialized, whose next INITIALIZE sweeps the rest.
+//!
+//! The `92` object sets up the DKEK: `0` draws one at random, `n` awaits `n`
+//! shares, and without it the device has no DKEK and keys never leave it.
 
 use rsk_crypto::Device;
 use rsk_fs::{Fs, Storage};
@@ -17,6 +20,7 @@ use crate::auth::{
     check_so, into_sw, load_init, seal_so_envelope, store_counters, write_init, write_user_envelope,
 };
 use crate::consts::*;
+use crate::dkek::{self, Dkek};
 use crate::files::walk;
 use crate::records::{Counters, Factor, Init};
 use crate::{HsmApplet, Session, dk, seal, store};
@@ -27,16 +31,19 @@ struct Params<'d> {
     user_pin: &'d [u8],
     so_pin: &'d [u8],
     retries: u8,
+    /// The `92` object: how many DKEK shares, `0` for a random DKEK.
+    dkek_shares: Option<u8>,
 }
 
 /// Parse the data objects strictly: an object this build does not implement —
-/// DKEK shares, key domains, public-key authentication, biometrics — is refused,
-/// never silently dropped.
+/// key domains, public-key authentication, biometrics — is refused, never
+/// silently dropped.
 fn parse(data: &[u8]) -> Result<Params<'_>, Sw> {
     let mut options = None;
     let mut user_pin = None;
     let mut so_pin = None;
     let mut retries = None;
+    let mut dkek_shares = None;
     walk(data, |tag, v| {
         let fresh = match tag {
             TAG_INIT_OPTIONS => match *v {
@@ -49,6 +56,10 @@ fn parse(data: &[u8]) -> Result<Params<'_>, Sw> {
             TAG_INIT_SO_PIN if v.len() == SO_PIN_LEN => so_pin.replace(v).is_none(),
             TAG_INIT_RETRIES => match *v {
                 [r] if (1..=USER_RETRIES_MAX).contains(&r) => retries.replace(r).is_none(),
+                _ => false,
+            },
+            TAG_INIT_DKEK_SHARES => match *v {
+                [n] => dkek_shares.replace(n).is_none(),
                 _ => false,
             },
             _ => false,
@@ -64,6 +75,7 @@ fn parse(data: &[u8]) -> Result<Params<'_>, Sw> {
         user_pin: user_pin.ok_or(Sw::WRONG_DATA)?,
         so_pin: so_pin.ok_or(Sw::WRONG_DATA)?,
         retries: retries.unwrap_or(USER_RETRIES_DEFAULT),
+        dkek_shares,
     })
 }
 
@@ -105,6 +117,11 @@ impl HsmApplet<'_> {
         let hmk = seal::random_key(&mut *rng);
         dk::write(fs, dev, &mut *rng, &dk, Factor::None, None)?;
         write_user_envelope(fs, &mut *rng, &dk, p.user_pin, &hmk)?;
+        match p.dkek_shares {
+            None => {}
+            Some(0) => dkek::store(fs, &dk, &Dkek::random(&mut *rng), &mut *rng)?,
+            Some(n) => dkek::store(fs, &dk, &Dkek::awaiting(n), &mut *rng)?,
+        }
         store_counters(
             fs,
             Counters {

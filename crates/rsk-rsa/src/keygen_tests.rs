@@ -158,3 +158,55 @@ fn generate_rsa_refuses_an_unusable_size() {
         Some(RsaError::Failed)
     );
 }
+
+#[test]
+fn a_key_rebuilt_from_n_e_and_d_is_the_same_key() {
+    let e = [0x01, 0x00, 0x01];
+    let key = rsa_from_pqe(&e, &hex(P_HEX), &hex(Q_HEX)).unwrap();
+    let d = key.d_be();
+    let back = rsa_from_ned(&hex(N_HEX), &e, &d, &mut SeqRng(7)).unwrap();
+    assert_eq!(back.n_be(), key.n_be());
+    assert_eq!(back.e_be(), key.e_be());
+    // The primes came back, whichever order they were found in.
+    let mut primes = [back.p().clone(), back.q().clone()];
+    primes.sort();
+    let mut want = [key.p().clone(), key.q().clone()];
+    want.sort();
+    assert_eq!(primes, want);
+    assert_eq!(&*back.d_be(), &*d);
+}
+
+#[test]
+fn a_triple_that_is_not_a_key_rebuilds_nothing() {
+    let e = [0x01, 0x00, 0x01];
+    let key = rsa_from_pqe(&e, &hex(P_HEX), &hex(Q_HEX)).unwrap();
+    let mut d = key.d_be().to_vec();
+    let n = hex(N_HEX);
+    *d.last_mut().unwrap() ^= 0x02;
+    assert!(
+        rsa_from_ned(&n, &e, &d, &mut SeqRng(7)).is_none(),
+        "a wrong d"
+    );
+    assert!(rsa_from_ned(&n, &e, &[], &mut SeqRng(7)).is_none());
+    assert!(rsa_from_ned(&n, &e, &[1], &mut SeqRng(7)).is_none());
+    let mut even = n.clone();
+    *even.last_mut().unwrap() &= 0xFE;
+    assert!(rsa_from_ned(&even, &e, &key.d_be(), &mut SeqRng(7)).is_none());
+    // Three primes: the walk finds a factor, and it is not a prime.
+    let p = BigUint::from_bytes_be(&hex(P_HEX));
+    let q = BigUint::from_bytes_be(&hex(Q_HEX));
+    let r = BigUint::from(65_539u32);
+    let n3 = &p * &q * &r;
+    let one = BigUint::from(1u8);
+    let lam = num_integer::Integer::lcm(
+        &num_integer::Integer::lcm(&(&p - &one), &(&q - &one)),
+        &(&r - &one),
+    );
+    let ee = BigUint::from(65_537u32);
+    use num_bigint_dig::ModInverse;
+    let d3 = (&ee).mod_inverse(&lam).unwrap().to_biguint().unwrap();
+    assert!(
+        rsa_from_ned(&n3.to_bytes_be(), &e, &d3.to_bytes_be(), &mut SeqRng(7)).is_none(),
+        "a three-prime modulus is not a key this layer holds"
+    );
+}

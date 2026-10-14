@@ -76,6 +76,23 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
   the chain OpenSC reads the token serial from. `rsk-ec` gains `ecdh_point`,
   `rsk-crypto` a one-shot SHA-224, and `rsk-device` the HSM boot pass and the
   dual-core RSA keygen path. **bcdDevice → 0x09DC.**
+- **The HSM applet keeps AES keys and backs keys up — still in no image.**
+  GENERATE SYMMETRIC KEY makes AES-128, -192 and -256 keys, with the same use
+  counter and algorithm list as the asymmetric ones; CIPHER SYMMETRIC runs
+  AES-CBC under a zero IV, the host owning the IV and the padding, and AES-CMAC.
+  A key leaves the device only as a SmartCard-HSM key blob (WRAP KEY), encrypted
+  and MACed under keys derived from the DKEK, and comes back the same way
+  (UNWRAP KEY, from `2F10`): the MAC is checked before a byte is decrypted, and a
+  restored key is rebuilt and checked whole — an RSA key from `n, e, d` or from
+  its CRT form, an EC key against its curve and its public point. A key whose own
+  algorithm list leaves out the wrap permission (`0x92`) never leaves at all.
+  INITIALIZE's `92` object sets the DKEK up: `0` draws one at random, `n` awaits
+  `n` shares that MANAGE KEY DOMAIN imports and XORs, reporting the shares owed
+  and the key check value, so `sc-hsm-tool --create-dkek-share` and
+  `--import-dkek-share` work as they do on a SmartCard-HSM; no key is made while
+  shares are owed. `rsk-rsa` gains `rsa_from_ned`, which recovers the primes of a
+  key that travelled as `n, e, d` (NIST SP 800-56B Appendix C), and `d_be`.
+  **bcdDevice → 0x09DD.**
 
 ## [0.4.11] - 2026-09-08
 

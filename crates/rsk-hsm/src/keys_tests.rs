@@ -26,6 +26,9 @@ fn a_key_object_round_trips_through_its_seal() {
             &rsa_blob,
         )
         .unwrap(),
+        KeyObject::new(KeyType::Aes(AesSize::A128), 2, &[ALGO_AES_CMAC], &[3; 16]).unwrap(),
+        KeyObject::new(KeyType::Aes(AesSize::A192), 2, &[], &[4; 24]).unwrap(),
+        KeyObject::new(KeyType::Aes(AesSize::A256), 2, &[ALGO_WRAP], &[5; 32]).unwrap(),
     ];
     for (kid, k) in (1u8..).zip(cases.iter()) {
         store(&mut fs, &hmk(1), kid, k, &mut TestRng(kid as u64)).unwrap();
@@ -33,7 +36,14 @@ fn a_key_object_round_trips_through_its_seal() {
         assert_eq!(back.ty, k.ty);
         assert_eq!(back.counter, k.counter);
         assert_eq!(back.material(), k.material());
-        for a in [ALGO_EC_RAW, ALGO_EC_DH, ALGO_EC_SHA384, ALGO_RSA_DECRYPT] {
+        assert_eq!(back.algos(), k.algos());
+        for a in [
+            ALGO_EC_RAW,
+            ALGO_EC_DH,
+            ALGO_EC_SHA384,
+            ALGO_RSA_DECRYPT,
+            ALGO_WRAP,
+        ] {
             assert_eq!(back.allows(a), k.allows(a));
         }
         assert!(exists(&mut fs, kid).unwrap());
@@ -91,6 +101,13 @@ fn decoding_refuses_what_no_build_wrote() {
         "an RSA size this applet does not make"
     );
     assert!(KeyObject::new(KeyType::Ec(&P256), 1, &[0; ALGOS_MAX + 1], &[7; 32]).is_none());
+    let mut aes = [0u8; PLAIN_MAX];
+    let a = KeyObject::new(KeyType::Aes(AesSize::A256), 1, &[], &[1; 32]).unwrap();
+    let m = a.encode(&mut aes);
+    assert!(KeyObject::decode(&aes[..m]).is_some());
+    aes[2..4].copy_from_slice(&64u16.to_be_bytes());
+    assert!(KeyObject::decode(&aes[..m]).is_none(), "a 512-bit AES key");
+    assert!(KeyObject::new(KeyType::Aes(AesSize::A128), 1, &[], &[1; 32]).is_none());
 }
 
 #[test]
@@ -103,6 +120,14 @@ fn each_type_serves_its_own_algorithms_only() {
     for a in [ALGO_RSA_RAW, ALGO_RSA_DECRYPT, ALGO_RSA_PKCS1, ALGO_RSA_PSS] {
         assert!(rsa.serves(a) && !ec.serves(a), "{a:#04x}");
     }
+    let aes = KeyType::Aes(AesSize::A128);
+    for a in [ALGO_AES_CBC_ENCRYPT, ALGO_AES_CBC_DECRYPT, ALGO_AES_CMAC] {
+        assert!(aes.serves(a) && !ec.serves(a) && !rsa.serves(a), "{a:#04x}");
+    }
+    for a in [ALGO_EC_RAW, ALGO_RSA_RAW, ALGO_EC_DH, ALGO_RSA_DECRYPT] {
+        assert!(!aes.serves(a), "{a:#04x}");
+    }
+    assert!(ec.serves(ALGO_WRAP) && rsa.serves(ALGO_WRAP) && aes.serves(ALGO_WRAP));
     for sha1 in [0x31, 0x41, 0x71] {
         assert!(!ec.serves(sha1) && !rsa.serves(sha1), "{sha1:#04x}");
     }

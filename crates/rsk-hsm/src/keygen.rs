@@ -14,7 +14,6 @@ use rsk_rsa::crt::{crt_from_plain, crt_plaintext};
 use rsk_rsa::{MAX_CRT_PLAIN, RsaKey, generate_rsa, modulus_be};
 use rsk_sdk::{Apdu, ResBuf, Rng, Sw};
 
-use crate::HsmApplet;
 use crate::auth::require_init;
 use crate::consts::*;
 use crate::cvc::{MNEMONIC_DEVICE, PublicKey, SigAlg, Writer, is_reference, put_body, reference};
@@ -23,9 +22,56 @@ use crate::files::walk;
 use crate::keyops::{EcRng, MAX_OUT, Private, RsaRng, device_key, ec_sw, sign_cv};
 use crate::keys::{self, ALGOS_MAX, COUNTER_UNLIMITED, KeyObject, KeyType, RsaSize};
 use crate::seal::{Key, Wiped};
+use crate::{HsmApplet, dkek};
 
 /// The only public exponent this device makes keys with.
 const RSA_EXPONENT: &[u8] = rsk_rsa::RSA_PUB_EXP_BE;
+
+/// The objects both key generations take after their own: a use counter, the
+/// algorithms the key may serve, and its key domain — each at most once.
+#[derive(Default)]
+pub(crate) struct Limits<'d> {
+    counter: Option<u32>,
+    algos: Option<&'d [u8]>,
+    domain: bool,
+}
+
+impl<'d> Limits<'d> {
+    /// Take one object: `None` when `tag` is none of these, else whether it was
+    /// well formed and not a repeat.
+    pub(crate) fn take(&mut self, tag: u16, v: &'d [u8]) -> Option<bool> {
+        Some(match tag {
+            TAG_KEY_USE_COUNTER => match *v {
+                [a, b, c, d] if u32::from_be_bytes([a, b, c, d]) != 0 => self
+                    .counter
+                    .replace(u32::from_be_bytes([a, b, c, d]))
+                    .is_none(),
+                _ => false,
+            },
+            TAG_KEY_ALGORITHMS => {
+                (1..=ALGOS_MAX).contains(&v.len()) && self.algos.replace(v).is_none()
+            }
+            TAG_KEY_DOMAIN => {
+                v == [KEY_DOMAIN_DEFAULT] && !core::mem::replace(&mut self.domain, true)
+            }
+            _ => return None,
+        })
+    }
+
+    pub(crate) fn counter(&self) -> u32 {
+        self.counter.unwrap_or(COUNTER_UNLIMITED)
+    }
+
+    /// The key's own algorithm list, refused unless `ty` serves every entry.
+    pub(crate) fn algos(&self, ty: KeyType) -> Result<&'d [u8], Sw> {
+        let algos = self.algos.unwrap_or(&[]);
+        if algos.iter().all(|&a| ty.serves(a)) {
+            Ok(algos)
+        } else {
+            Err(Sw::WRONG_DATA)
+        }
+    }
+}
 
 /// What a GENERATE KEY PAIR asks for.
 struct Template<'d> {
@@ -119,26 +165,14 @@ fn parse(data: &[u8]) -> Result<Template<'_>, Sw> {
     let mut car = None;
     let mut chr = None;
     let mut pk = None;
-    let mut counter = None;
-    let mut algos = None;
-    let mut domain_seen = false;
+    let mut limits = Limits::default();
     walk(data, |tag, v| {
         let fresh = match tag {
             TAG_CV_PROFILE if v == [CV_PROFILE] => profile.replace(()).is_none(),
             TAG_CV_CAR if is_reference(v) => car.replace(v).is_none(),
             TAG_CV_CHR if is_reference(v) => chr.replace(v).is_none(),
             TAG_CV_PUBKEY => pk.replace(v).is_none(),
-            TAG_KEY_USE_COUNTER => match *v {
-                [a, b, c, d] if u32::from_be_bytes([a, b, c, d]) != 0 => {
-                    counter.replace(u32::from_be_bytes([a, b, c, d])).is_none()
-                }
-                _ => false,
-            },
-            TAG_KEY_ALGORITHMS if (1..=ALGOS_MAX).contains(&v.len()) => algos.replace(v).is_none(),
-            TAG_KEY_DOMAIN if v == [KEY_DOMAIN_DEFAULT] => {
-                !core::mem::replace(&mut domain_seen, true)
-            }
-            _ => false,
+            _ => limits.take(tag, v).unwrap_or(false),
         };
         if fresh { Ok(()) } else { Err(Sw::WRONG_DATA) }
     })?;
@@ -146,17 +180,13 @@ fn parse(data: &[u8]) -> Result<Template<'_>, Sw> {
         return Err(Sw::WRONG_DATA);
     }
     let (alg, ty) = parse_public_key(pk.ok_or(Sw::WRONG_DATA)?)?;
-    let algos: &[u8] = algos.unwrap_or(&[]);
-    if !algos.iter().all(|&a| ty.serves(a)) {
-        return Err(Sw::WRONG_DATA);
-    }
     Ok(Template {
         car,
         chr: chr.ok_or(Sw::WRONG_DATA)?,
         alg,
         ty,
-        counter: counter.unwrap_or(COUNTER_UNLIMITED),
-        algos,
+        counter: limits.counter(),
+        algos: limits.algos(ty)?,
     })
 }
 
@@ -223,6 +253,9 @@ impl HsmApplet<'_> {
         if apdu.p1 == KEY_ID_DEVICE {
             return Err(Sw::SECURITY_STATUS_NOT_SATISFIED);
         }
+        if dkek::pending(fs)? {
+            return Err(Sw::CONDITIONS_NOT_SATISFIED);
+        }
         let tpl = parse(apdu.data)?;
         if keys::exists(fs, apdu.p1)? {
             return Err(Sw::FILE_EXISTS);
@@ -253,6 +286,8 @@ impl HsmApplet<'_> {
                     Err(_) => Err(Sw::EXEC_ERROR),
                 }
             }
+            // A template never names a symmetric key.
+            KeyType::Aes(_) => Err(Sw::EXEC_ERROR),
         };
         match r {
             Ok(()) => Sw::OK,
@@ -274,7 +309,7 @@ impl HsmApplet<'_> {
         }
         match self.keygen_checks(fs, apdu).ok()?.0.ty {
             KeyType::Rsa(size) => Some(size.bits()),
-            KeyType::Ec(_) => None,
+            KeyType::Ec(_) | KeyType::Aes(_) => None,
         }
     }
 

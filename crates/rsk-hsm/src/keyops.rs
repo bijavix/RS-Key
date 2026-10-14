@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2026 RS-Key contributors
 
-//! SIGN and DECIPHER: the private-key operations, and the access a key is checked
-//! for before one runs. In order: the device is initialized, the lock is open,
-//! the user PIN is verified, the key exists and its type and its own list admit
-//! the algorithm, a use is left — then the touch, if the owner asked for one, and
-//! the spent use is persisted before the operation, so a power cut never refunds
-//! it.
+//! SIGN and DECIPHER: the private-key operations, and the access every key use is
+//! checked for before one runs. In order: the algorithm is one of the
+//! instruction's, the device is initialized, the lock is open, the user PIN is
+//! verified, the key exists and its type and its own list admit the algorithm, a
+//! use is left — then the touch, if the owner asked for one, and the spent use is
+//! persisted before the operation, so a power cut never refunds it.
 
 use rsk_crypto::Device;
 use rsk_ec::{EcError, MAX_EC_SIG, PrivKey};
@@ -44,6 +44,42 @@ impl rsk_ec::Rng for EcRng<'_> {
 /// The widest signature or plaintext an operation answers: an RSA-4096 block.
 pub(crate) const MAX_OUT: usize = rsk_rsa::MAX_RSA_BYTES;
 
+/// The instruction a key is used through. Each algorithm belongs to one, and a
+/// key serves it there and nowhere else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Use {
+    Sign,
+    Decipher,
+    Cipher,
+}
+
+impl Use {
+    fn of(algo: u8) -> Option<Use> {
+        Some(match algo {
+            ALGO_RSA_RAW
+            | ALGO_RSA_PKCS1
+            | ALGO_RSA_PKCS1_SHA256
+            | ALGO_RSA_PKCS1_SHA384
+            | ALGO_RSA_PKCS1_SHA512
+            | ALGO_RSA_PSS
+            | ALGO_RSA_PSS_SHA256
+            | ALGO_RSA_PSS_SHA384
+            | ALGO_RSA_PSS_SHA512
+            | ALGO_EC_RAW
+            | ALGO_EC_SHA224
+            | ALGO_EC_SHA256
+            | ALGO_EC_SHA384
+            | ALGO_EC_SHA512 => Use::Sign,
+            ALGO_RSA_DECRYPT | ALGO_EC_DH => Use::Decipher,
+            ALGO_AES_CBC_ENCRYPT | ALGO_AES_CBC_DECRYPT | ALGO_AES_CMAC => Use::Cipher,
+            _ => return None,
+        })
+    }
+}
+
+/// AES works in blocks of this many bytes.
+pub(crate) const AES_BLOCK: usize = 16;
+
 /// A key ready to operate. Both halves wipe themselves when dropped.
 // One lives on the stack for one operation. Boxing the RSA half would put a
 // private key on the heap the RSA layer's bignums share, to save stack nobody
@@ -63,6 +99,7 @@ impl Private {
             KeyType::Rsa(_) => crt_from_plain(obj.material())
                 .map(Private::Rsa)
                 .map_err(|_| Sw::MEMORY_FAILURE),
+            KeyType::Aes(_) => Err(Sw::EXEC_ERROR),
         }
     }
 }
@@ -205,20 +242,28 @@ fn input_ok(ty: KeyType, algo: u8, data: &[u8]) -> bool {
         }
         (KeyType::Ec(d), ALGO_EC_RAW) => (d.field_len() / 2..=MAX_DIGEST).contains(&data.len()),
         (KeyType::Ec(d), ALGO_EC_DH) => data.len() == d.point_len() && data[0] == 0x04,
+        (KeyType::Aes(_), ALGO_AES_CBC_ENCRYPT | ALGO_AES_CBC_DECRYPT) => {
+            !data.is_empty() && data.len().is_multiple_of(AES_BLOCK)
+        }
+        (KeyType::Aes(_), ALGO_AES_CMAC) => true,
         _ => card_hash(algo).is_some(),
     }
 }
 
 impl HsmApplet<'_> {
-    /// Every check a key use passes, the touch, and the spent use — what SIGN and
-    /// DECIPHER share. Returns the key, opened.
-    fn take_key<S: Storage>(
+    /// Every check a key use passes, the touch, and the spent use — what SIGN,
+    /// DECIPHER and CIPHER SYMMETRIC share. Returns the key, opened.
+    pub(crate) fn take_key<S: Storage>(
         &mut self,
         fs: &mut Fs<S>,
         kid: u8,
+        via: Use,
         algo: u8,
         data: &[u8],
     ) -> Result<KeyObject, Sw> {
+        if Use::of(algo) != Some(via) {
+            return Err(Sw::INCORRECT_P1P2);
+        }
         let init = require_init(fs)?;
         self.require_open(fs)?;
         let hmk = self
@@ -264,10 +309,7 @@ impl HsmApplet<'_> {
         res: &mut ResBuf,
     ) -> Result<(), Sw> {
         let (kid, algo, data) = (apdu.p1, apdu.p2, apdu.data);
-        if matches!(algo, ALGO_RSA_DECRYPT | ALGO_EC_DH) {
-            return Err(Sw::INCORRECT_P1P2);
-        }
-        let obj = self.take_key(fs, kid, algo, data)?;
+        let obj = self.take_key(fs, kid, Use::Sign, algo, data)?;
         let key = Private::of(&obj)?;
         let mut digest = [0u8; MAX_DIGEST];
         let hashed = card_hash(algo).map(|h| h.digest(data, &mut digest));
@@ -327,10 +369,7 @@ impl HsmApplet<'_> {
         res: &mut ResBuf,
     ) -> Result<(), Sw> {
         let (kid, algo, data) = (apdu.p1, apdu.p2, apdu.data);
-        if !matches!(algo, ALGO_RSA_DECRYPT | ALGO_EC_DH) {
-            return Err(Sw::INCORRECT_P1P2);
-        }
-        let obj = self.take_key(fs, kid, algo, data)?;
+        let obj = self.take_key(fs, kid, Use::Decipher, algo, data)?;
         let mut out = Wiped::<MAX_OUT>::zeroed();
         let n = match Private::of(&obj)? {
             Private::Rsa(c) => {
@@ -345,7 +384,7 @@ impl HsmApplet<'_> {
 }
 
 /// Answer `body`, or say it does not fit.
-fn put(res: &mut ResBuf, body: &[u8]) -> Result<(), Sw> {
+pub(crate) fn put(res: &mut ResBuf, body: &[u8]) -> Result<(), Sw> {
     if res.extend(body) {
         Ok(())
     } else {

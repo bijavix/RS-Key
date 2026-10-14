@@ -654,12 +654,15 @@ fn initialize_parses_strictly() {
         init_data(0x0002, PIN, &SO_PIN, None),
         init_data(0x0004, PIN, &SO_PIN, None),
     ];
-    // DKEK shares, key domains and public-key authentication are not offered.
+    // Key domains and public-key authentication are not offered, and the DKEK
+    // share count is one byte, given once.
     for extra in [
-        &[0x92, 1, 1][..],
-        &[0x97, 1, 1],
+        &[0x97, 1, 1][..],
         &[0x93, 2, 2, 1],
         &[0x95, 1, 0],
+        &[0x92, 0],
+        &[0x92, 2, 0, 1],
+        &[0x92, 1, 1, 0x92, 1, 1],
     ] {
         let mut d = init_data(0, PIN, &SO_PIN, None);
         d.extend_from_slice(extra);
