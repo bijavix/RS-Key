@@ -4,7 +4,7 @@ The RS-Key security key ships one image family; this adds a second: an **HSM
 image** built from the same tree, for a homelab server that wants a key store
 behind PKCS#11 — LUKS unlock through `systemd-cryptenroll --pkcs11-token-uri`,
 SSH host and CA keys, a small internal TLS CA. The security-key image is
-untouched by it: different binary, same crates.
+untouched by it: same crates, same bring-up, a cargo feature apart.
 
 This page is the design record the implementation was built against. What a user
 needs is in [guides/hsm.md](guides/hsm.md); what it does not defend against is in
@@ -50,15 +50,16 @@ So the alternative — a custom PKCS#11 module or an OpenSC patch — is not nee
 | `rsk-rsa` | RSA keygen (and the dual-core prime search hook), the CRT blob, the blinded + fault-checked private op — unchanged |
 | `rsk-rescue`, `rsk-vendor`, `rsk-phy`, `rsk-led` | provisioning, OTP fuse writes, secure-boot status, LED, reboot, USB identity — unchanged |
 | **`rsk-hsm`** (new) | the HSM applet: the APDU subset, the file system mapping, PINs, the lock state machine, the sealed key store, CVC encoding, DKEK backup. `no_std`, host-tested, fuzzed |
-| `rsk-device` | gains an `hsm` feature: `HsmApplets`, the HSM image's CCID wiring (vendor + HSM + rescue) with the same dual-core RSA keygen fast path the PIV/OpenPGP wiring has |
-| `firmware` | gains the `firmware-hsm` binary (`required-features = ["hsm"]`): its own root and CCID-only worker over the shared board modules (LED, presence, flash, OTP, core1). The `firmware` binary is untouched |
+| `rsk-device` | gains `HsmApplets`, the HSM image's CCID wiring (vendor + HSM + rescue) with the same dual-core RSA keygen fast path the PIV/OpenPGP wiring has, and `hsm_boot`, its boot pass. Unconditional: only the HSM image instantiates them, so the key image links none of it |
+| `firmware` | gains the `hsm` feature, built the way `display` is: the same board bring-up (LED, presence, flash, OTP, core1) composes a CCID-only device and an HSM worker (`hsm_worker.rs`) instead of the key's transports and worker, which the feature compiles out. Without it the key image is the same code |
 | `tools/emu` | `--hsm` runs the HSM applet set; `--vpcd` attaches it to `pcscd` as a virtual reader, which is how OpenSC is tested with no board |
 | `tools/rsk` | `rsk hsm …`: status, lock arm/unlock/disarm, DKEK shares (SLIP-39 n-of-m), attestation check |
 
-No applet names another applet: `rsk-hsm` is wired only by `rsk-device`,
-`firmware`, the emulator and the fuzzer (`deny.toml` R2). The device attestation
-key lives in `rsk-rescue`, so the HSM reaches it through a seam the wiring fills
-(`rsk_hsm::Attestor`), not through a dependency.
+No applet names another applet: `rsk-hsm` is wired by `rsk-device` (and by the
+emulator and the fuzzer for their own harnesses; `deny.toml` R2). The device
+attestation key lives in `rsk-rescue`, so the HSM reaches it through a seam the
+wiring fills — the `rsk_hsm::RootSign` closure `rsk_hsm::provision` signs with —
+not through a dependency.
 
 ## Command subset
 
@@ -173,7 +174,7 @@ stateDiagram-v2
 
 ## Image, boards, flavors
 
-`cargo build --release -p firmware --features hsm --bin firmware-hsm`. One USB
+`cargo build --release -p firmware --features hsm`. One USB
 interface (CCID), product string `RS-Key HSM`, the RS-Key VID:PID and ATR, the
 same partition table, secure-boot and OTP story as the key. Flavors: `hsm` (4 MB),
 `hsm-2mb` (`FLASH_SIZE=2M KVMAIN=896K`, Waveshare RP2350-USB-A), `hsm-16mb`
@@ -182,18 +183,20 @@ on GPIO16, GPIO12/13 reserved for the USB-A port).
 
 ## Flash budget
 
-The HSM image drops FIDO2 (CBOR, ML-DSA, ML-KEM), OpenPGP, PIV, OATH, OTP, the
-management applet and the brainpool/Edwards curves, and adds the HSM applet.
-Measured sizes are in [build.md](build.md#the-hsm-image); the design target was
-**under half** of the 2 MB board's 1024 KiB code region, which leaves the USB-A
-host milestone room. The check.sh ratchet holds the measured figure.
+The HSM image drops FIDO2 (CBOR, ML-DSA, ML-KEM), OpenPGP, PIV, OATH, OTP and
+the management applet, and adds the HSM applet. The brainpool and Edwards
+curves stay linked: the EC layer's key type spans every curve, and its match arms
+keep them reachable. Measured on the 2 MB geometry the image is **580 KiB** of
+the 1024 KiB code region — over the "under half" this design set itself, still
+444 KiB clear for the USB-A host milestone. The check.sh ratchet holds the
+measured figure ([build.md](build.md#the-hsm-image)).
 
 ## Milestones
 
 1. **Core** — `rsk-hsm`: files, INITIALIZE, PINs, the lock, the sealed store.
 2. **Asymmetric keys** — EC/RSA keygen, SIGN, DECIPHER/ECDH, CVC, device attestation.
 3. **Backup** — AES keys, DKEK shares, WRAP/UNWRAP.
-4. **Image** — `rsk-device` wiring, `firmware-hsm`, boards, nix flavors, gate rows.
+4. **Image** — `rsk-device` wiring, the firmware `hsm` feature, boards, nix flavors, gate rows.
 5. **Emulator and tests** — `--hsm`, `--vpcd`, `tests/86_hsm.py`, fuzz targets.
 6. **Interop** — OpenSC `pkcs11-tool` and LUKS enrollment, scripted.
 7. **Host tool** — `rsk hsm`.

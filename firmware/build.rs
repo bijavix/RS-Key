@@ -904,7 +904,7 @@ fn resolve_xosc_delay_mult() -> u32 {
 ///
 /// The descriptor strings follow the resolved VID: the default build presents
 /// this project's own identity (manufacturer `RS-Key`, product `RS-Key Security
-/// Key`) and is NOT a masquerade. The Yubico VID (`0x1050`) instead swaps in the
+/// Key`, or `RS-Key HSM` for the `hsm` image) and is NOT a masquerade. The Yubico VID (`0x1050`) instead swaps in the
 /// `Yubico` / `YubiKey …` strings, because `ykman` / Yubico Authenticator derive
 /// the device's PID *purely from the PC/SC reader name* (it must contain "Yubico
 /// YubiKey"). That is an opt-in local-interop flavor — built by the interop suite
@@ -955,6 +955,9 @@ fn resolve_identity() -> (u16, u16, String, String) {
             "Yubico".to_string(),
             "YubiKey RSK OTP+FIDO+CCID".to_string(),
         )
+    } else if env::var_os("CARGO_FEATURE_HSM").is_some() {
+        // The HSM image names itself, so its PC/SC reader is told apart from a key's.
+        ("RS-Key".to_string(), "RS-Key HSM".to_string())
     } else {
         ("RS-Key".to_string(), "RS-Key Security Key".to_string())
     };

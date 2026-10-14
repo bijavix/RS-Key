@@ -183,6 +183,7 @@ CLAIM_ROWS=(
   "^node --test |gate|"
   "^sh -c |gate|"
   "^[a-z_][a-z_0-9]*\$|gate|"
+  "^image_links_none_of [a-z_0-9 ]+\$|gate|"
 )
 
 # --- running ------------------------------------------------------------------

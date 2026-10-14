@@ -1459,6 +1459,41 @@ fn a_selection_drops_an_unused_channel() {
     );
 }
 
+#[test]
+fn forgetting_ahead_of_a_reset_ends_the_login_and_closes_the_lock() {
+    let env = Env::new();
+    let mut fs = new_fs();
+    let mut app = env.applet(None);
+    ready(&mut app, &mut fs);
+    assert_eq!(arm(&mut app, &mut fs, &SECRET, &SO_PIN), Sw::OK);
+    assert_eq!(verify(&mut app, &mut fs, PIN), Sw::OK);
+    let host_pub = {
+        use rsk_crypto::pinproto::public_xy;
+        let (x, y) = public_xy(&[0x42; 32]).unwrap();
+        [&[0x04][..], &x, &y].concat()
+    };
+    let channel = run(
+        &mut app,
+        &mut fs,
+        CLA_PROPRIETARY,
+        INS_LOCK,
+        LOCK_CHANNEL,
+        0,
+        &host_pub,
+    );
+    assert_eq!(channel.0, Sw::OK);
+    app.forget();
+    assert!(app.sess.hmk.is_none() && app.channel.is_none());
+    assert!(matches!(app.lock, Lock::Unknown));
+    assert_eq!(lock_status(&mut app, &mut fs)[1], LOCK_STATE_LOCKED);
+    assert_eq!(verify(&mut app, &mut fs, PIN), Sw::CONDITIONS_NOT_SATISFIED);
+    assert_eq!(unlock(&mut app, &mut fs, &SECRET), Sw::OK);
+    assert_eq!(
+        status(&mut app, &mut fs, PIN_USER),
+        Sw::retries(USER_RETRIES_DEFAULT)
+    );
+}
+
 // ---- The OTP root ----
 
 #[test]

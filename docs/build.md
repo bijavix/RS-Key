@@ -41,16 +41,17 @@ flowchart TD
 | `always-uv` | off | Bake the CTAP 2.1 `alwaysUv` option **on by default**, so the key requires user verification (a PIN — or the `display` build's built-in UV pad) for **every** makeCredential / getAssertion straight out of the box, with no post-flash `ykman fido config toggle-always-uv`. The shipped image leaves alwaysUv off until a platform turns it on; this flag flips the default. It stays runtime-toggleable — `toggleAlwaysUv` writes an override that survives reboots but not an `authenticatorReset`, which restores this compiled default. **Set a PIN after flashing:** with alwaysUv on and no PIN, FIDO operations return `CTAP2_ERR_PUAT_REQUIRED` until one is set — the standard cue for the platform (Windows, Chrome) to prompt for a PIN. While alwaysUv is on the **CTAP1/U2F interface is disabled** (CTAP 2.1 §7.2.4, as on a YubiKey): U2F only proves presence, never verification, so legacy U2F-only logins stop working, and getInfo drops `U2F_V2` from its advertised `versions`; WebAuthn / CTAP2 (passkeys) are unaffected. The one exception §7.2.4 allows is a build "protected by a built-in user verification method": on a `display` build **with a PIN set**, U2F stays available and every register / authenticate collects the PIN on the panel instead of a touch. |
 | `largeblob-ext` | off | Serve the **CTAP 2.3 §12.4 `largeBlob` extension instead of** the CTAP 2.1 large-blob design. Not additive, and not a choice the firmware could dodge: §12.4 says *"Authenticators MUST NOT support both extensions"*, so enabling it **withdraws** the `largeBlobKey` extension, the `authenticatorLargeBlobs` command (`0x0C`, which then answers `CTAP1_ERR_INVALID_COMMAND`), the `largeBlobs` option and `maxSerializedLargeBlobArray`. Blobs then live **per credential** (discoverable credentials only) instead of in one platform-managed array, and a whole blob rides in the `getAssertion` that reads or writes it — up to 4046 bytes, sealed at rest under the device seed with the credential id as AAD, which the 2.1 design does not need because the platform encrypts that array itself. Off by default, and think before turning it on: the 2.1 pair is what every shipping browser drives today, so a `largeblob-ext` key **loses WebAuthn `largeBlob` support with current clients**. |
 | `display` | off | **Experimental** trusted-display build for a screen + touch board (Waveshare RP2350-Touch-LCD-2.8). Adds an on-screen **Approve / Deny** that paints the real relying party for every touch (Deny refuses with `OPERATION_DENIED`), an on-device **PIN pad** (built-in user verification (`options.uv`), plus a CCID **pinpad** so GnuPG / OpenSC collect the OpenPGP / PIV PIN on the panel, never over USB), a read-only **Apps** browser (OpenPGP / PIV / OATH state, no PIN), a **Passkeys** manager (delete / rename on-device), and **Settings** (device & FIDO PINs, an optional scrambled PIN pad, on-screen BIP-39 / SLIP-39 recovery export, audit log, factory reset). Entirely `dep:`-gated. A standard key compiles **none** of it, so its image is unaffected. Build it `LED_KIND=none FLASH_SIZE=16M … --features display` (the panel takes GPIO16 for its backlight; a compile-time guard enforces `LED_KIND=none`). Full walkthrough with screenshots: [guides/display.md](guides/display.md). |
+| `hsm` | off | **Builds the HSM image instead of the security key** ([the HSM image](#the-hsm-image) below): one CCID interface whose card is the HSM applet — a SmartCard-HSM-compatible subset OpenSC serves as a PKCS#11 token — between the vendor and rescue applets. No FIDO, OpenPGP, PIV, OATH, OTP or management applet, no keyboard or CTAPHID interface. Not combinable with `display` (a compile-time guard refuses the pair). Ship it as `firmware-hsm`. |
 | `strict-config` | off | **Restores the historical strict admin-write authorization.** The DEFAULT build is now the permissive, full-ykman/YubiKey-compatible admin surface: device-config writes (CCID Management `WRITE CONFIG`, FIDO vendor `CONFIG_WRITE`, the CTAPHID `0x43` and OTP-HID `0x15` transport writes) are **ungated**, and Management RESET (device-wide factory reset) plus the OTP-HID `DEVICE_CONFIG` / `SCAN_MAP` / `NDEF` slots are served. `--features strict-config` re-imposes the presence/PIN gates and refuses the ungated transport writes — the historical shipped behavior. This deliberately weakens the DEFAULT threat model: any USB host can rewrite the reported identity with no operator confirmation ([threat-model.md](threat-model.md)). **Not** the runtime flash flag `EF_HARDENED`. Ship it as `firmware-strict-config`. |
 
 ## Environment variables
 
 | Variable | Default | Values | Effect |
 |---|---|---|---|
-| `BOARD` | none | a file name under `firmware/boards/` (`abrobot-4m`, `abrobot-16m`, `waveshare-one`, `waveshare-touch-lcd`, `tenstar-usb`, `seeed-xiao`) | Load that board's knob set instead of setting the LED / presence / flash / display variables one by one. Every variable below still wins when you set it explicitly, so a board file is a default set, not a lock. It selects **no cargo features** — a display board still needs `--features display`. Each shipped board file is smoke-built in CI. |
+| `BOARD` | none | a file name under `firmware/boards/` (`abrobot-4m`, `abrobot-16m`, `waveshare-one`, `waveshare-touch-lcd`, `waveshare-usb-a`, `tenstar-usb`, `seeed-xiao`) | Load that board's knob set instead of setting the LED / presence / flash / display variables one by one. Every variable below still wins when you set it explicitly, so a board file is a default set, not a lock. It selects **no cargo features** — a display board still needs `--features display`, and the Waveshare RP2350-USB-A, which is sized for the HSM image, `--features hsm`. Each shipped board file is smoke-built in CI. |
 | `VIDPID` | `RSKey` | `RSKey`, `Yubikey5`, `YubikeyNeo`, `YubiHSM`, `NitroHSM`, `NitroFIDO2`, `NitroStart`, `NitroPro`, `Nitro3`, `Gnuk`, `GnuPG`, `Pico`, `Dev` | USB VID/PID preset. The default `RSKey` (`0x1209:0x0001`) is this project's own [pid.codes](https://pid.codes/) identity, not a masquerade. The opt-in `Yubikey5` (`0x1050:0x0407`) instead presents Yubico's VID/PID **and** swaps the descriptor strings to `Yubico` / `YubiKey RSK …`. That is what makes `ykman`, Yubico Authenticator and the stock Yubico udev rules recognize the device; build it only for local interop / the interop suite. `Pico` = the Raspberry Pi generic id (`0x2E8A:0x10FD`); `Dev` = a non-colliding placeholder (`0xFEFF:0xFCFD`). An unknown preset fails the build. **The vendor-mimicking presets are for local interop only. Never distribute hardware carrying them.** |
 | `USB_VID` / `USB_PID` | from preset | `0xHHHH` | Raw override, applied on top of the preset (you can override either half alone). |
-| `USB_MANUFACTURER` / `USB_PRODUCT` | from preset | string | Raw override of the USB descriptor strings. The default is `RS-Key` / `RS-Key Security Key`; the Yubico VID instead bakes `Yubico` / `YubiKey RSK OTP+FIDO+CCID`. The project's own tools (`rsk`, `rsk-tui`) match the reader by the `RS-Key` (or `RSK`) token in the product string. |
+| `USB_MANUFACTURER` / `USB_PRODUCT` | from preset | string | Raw override of the USB descriptor strings. The default is `RS-Key` / `RS-Key Security Key` (`RS-Key HSM` for the `hsm` image); the Yubico VID instead bakes `Yubico` / `YubiKey RSK OTP+FIDO+CCID`. The project's own tools (`rsk`, `rsk-tui`) match the reader by the `RS-Key` (or `RSK`) token in the product string. |
 | `FW_VERSION` | `5.8.0` | `X.Y.Z` or `X.Y` | The firmware version reported everywhere a tool looks: management DeviceInfo (`ykman info`), FIDO getInfo, CTAPHID INIT, OATH/OTP/PIV version fields, OpenPGP's vendor `VERSION` (INS 0xF1). Yubico tools gate features on it; 5.8.0 mimics a current YubiKey 5. Does **not** change the OpenPGP card version (3.4) or the USB `bcdDevice` (an internal build counter). |
 | `XOSC_DELAY_MULT` | `128` | `1..=1024` | Crystal-oscillator startup-delay multiplier ("delayed boot"). A longer settle wait is intended to harden the early-boot clock-switch window against glitch/fault injection. 128 is the embassy default. |
 | `FLASH_SIZE` | `4M` | bytes, `0xHEX`, or `<n>K`/`<n>M` | External QSPI flash size. build.rs regenerates `memory.x` from it. The KV store (`KVMAIN` + `KVCNT`) stays pinned at the top and the code region is the rest; `4M` with the default `KVMAIN` reproduces the checked-in layout byte-for-byte. Use this for boards with a different flash chip (e.g. `8M`); must be ≤ 16 MB and leave ≥ 1 MB for code after the KV store (a 2 MB board needs a smaller `KVMAIN`, below). |
@@ -180,7 +181,33 @@ cargo build --release -p firmware --features always-uv
 
 # strict admin-write posture (the historical default; config writes stay gated)
 cargo build --release -p firmware --features strict-config
+
+# the HSM image, for the 2 MB Waveshare RP2350-USB-A it is sized for
+env BOARD=waveshare-usb-a cargo build --release -p firmware --features hsm
 ```
+
+## The HSM image
+
+`--features hsm` builds a different product from the same tree: the board
+bring-up — flash, the OTP root and secure boot, the TRNG, the LED, the presence
+button, the second core — is the security key's, and what the host sees is not.
+The device enumerates as one CCID interface (product string `RS-Key HSM`, the
+RS-Key VID:PID and ATR) whose card is the HSM applet, between the vendor and
+rescue applets every image carries. OpenSC's built-in `sc-hsm` driver serves it
+as a PKCS#11 token; the design is [hsm-design.md](hsm-design.md).
+
+| Flavor | Knobs | Board |
+|---|---|---|
+| `firmware-hsm` | `--features hsm` | 4 MB boards (the RP2350 default) |
+| `firmware-hsm-2mb` | `--features hsm`, `FLASH_SIZE=2M`, `KVMAIN=896K` | the Waveshare RP2350-USB-A (`BOARD=waveshare-usb-a`) |
+| `firmware-hsm-16mb` | `--features hsm`, `FLASH_SIZE=16M` | 16 MB boards, e.g. the TenStar RP2350-USB |
+
+The image links none of the key's applets — `check.sh` reads the symbol table to
+hold that, and to hold the key image free of the HSM applet in turn. It measures
+580 KiB on the 2 MB geometry, whose code region is 1024 KiB; `check.sh` keeps it
+under a 610 KiB ratchet. The key and the HSM images keep their records in
+disjoint parts of the store, so reflashing one over the other loses nothing of
+either, and both seal what they keep under the same device root.
 
 ## `nix build` (hermetic, no dev shell)
 
@@ -223,6 +250,7 @@ check the seal with `picotool`. The flavors mirror the
 | `.#firmware-2mb` | default features + RS-Key identity, `FLASH_SIZE=2M`, `KVMAIN=896K` (2 MB boards: Seeed XIAO RP2350, Waveshare RP2350-Zero-CM) |
 | `.#firmware-16mb` | default features + RS-Key identity, `FLASH_SIZE=16M` (16 MB boards, e.g. TenStar RP2350-USB) |
 | `.#firmware-strict-config` | `--features strict-config` (historical strict admin-write posture; the default `firmware` is now the permissive full-ykman admin surface) |
+| `.#firmware-hsm` | `--features hsm` — [the HSM image](#the-hsm-image); also `.#firmware-hsm-2mb` (`FLASH_SIZE=2M`, `KVMAIN=896K`, the Waveshare RP2350-USB-A) and `.#firmware-hsm-16mb` (`FLASH_SIZE=16M`) |
 
 Two caveats:
 

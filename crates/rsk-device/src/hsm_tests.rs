@@ -259,6 +259,33 @@ fn the_response_buffer_is_wiped_after_the_hand_off() {
     assert!(hsm.resp.iter().all(|&b| b == 0));
 }
 
+#[test]
+fn a_reboot_scrub_closes_the_lock_and_ends_the_login() {
+    let env = Env::new();
+    let mut hsm = env.hsm();
+    initialize(&mut hsm);
+    let mut plain = SECRET.to_vec();
+    plain.extend_from_slice(&SO_PIN);
+    let blob = boxed(&mut hsm, &plain);
+    let arm = apdu(
+        CLA_PROPRIETARY,
+        INS_LOCK,
+        LOCK_ARM,
+        LOCK_FACTOR_HOST_KEY,
+        &blob,
+    );
+    assert_eq!(sw(hsm.handle_apdu(&arm)), Sw::OK);
+    assert_eq!(verify(&mut hsm, PIN), Sw::OK);
+    hsm.handle_apdu(&ext(CLA_ISO, INS_GET_CHALLENGE, 0, 0, &[]));
+    hsm.scrub_secrets();
+    assert!(hsm.resp.iter().all(|&b| b == 0));
+    // The same applet, no power cycle: what a warm reset would have found.
+    assert_eq!(lock_state(&mut hsm), LOCK_STATE_LOCKED);
+    assert_eq!(verify(&mut hsm, PIN), Sw::CONDITIONS_NOT_SATISFIED);
+    assert_eq!(hsm.unlock(&SECRET), Ok(()));
+    assert_eq!(verify(&mut hsm, &[]), Sw::retries(USER_RETRIES_DEFAULT));
+}
+
 /// The boot pass over `env`'s store, as the HSM image runs it before USB attaches.
 fn boot_env(env: &Env) -> bool {
     let dev = Device {

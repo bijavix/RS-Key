@@ -3,10 +3,13 @@
 
 //! Composite USB device: FIDO CTAPHID + CCID smart-card + emulated keyboard.
 //! Two-executor split: USB + the transports run on a high-priority interrupt
-//! executor, the [`worker::Worker`] (slow synchronous applet dispatch) on the
+//! executor, the worker (`worker.rs`: slow synchronous applet dispatch) on the
 //! thread executor — so keepalives keep flowing during long crypto. The second
 //! core joins in for RSA keygen only ([`core1`]): both cores race the prime
 //! search while the transports keep the host alive.
+//!
+//! The `hsm` feature builds the HSM image from the same bring-up: a CCID-only
+//! device whose worker (`hsm_worker.rs`) serves the HSM applet set instead.
 #![no_std]
 #![no_main]
 
@@ -32,6 +35,7 @@ use embassy_rp::pio_programs::ws2812::{PioWs2812, PioWs2812Program};
 use embassy_rp::trng::{Config as TrngConfig, InterruptHandler as TrngIrq, Trng};
 use embassy_rp::usb::{Driver as UsbDriver, InterruptHandler as UsbIrq};
 use embassy_time::Timer;
+#[cfg(not(feature = "hsm"))]
 use embassy_usb::class::hid::{
     Config as HidConfig, HidBootProtocol, HidReaderWriter, HidSubclass, HidWriter,
     State as HidState,
@@ -42,21 +46,39 @@ use static_cell::StaticCell;
 use rsk_crypto::{Device, FusedKey, read_fused};
 use rsk_fs::Fs;
 use rsk_usb::ccid::{ATR_RSKEY, ATR_YUBIKEY, Ccid};
+#[cfg(not(feature = "hsm"))]
 use rsk_usb::ctaphid::{CtapHid, FIDO_REPORT_DESCRIPTOR};
 
+// The HSM image compiles the board modules the key shares with it and leaves the
+// key's own parts of them — the CTAPHID and keyboard hooks, the FIDO clocks —
+// unused; the key build lints them as before.
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod core1;
 #[cfg(feature = "display")]
 mod display;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod flash_storage;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod handler;
+#[cfg(feature = "hsm")]
+mod hsm_worker;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod led;
+#[cfg(not(feature = "hsm"))]
 mod otp_kbd;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod otp_keys;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod pin_lock;
+#[cfg_attr(feature = "hsm", allow(dead_code, unused_imports))]
 mod presence;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod rescue_platform;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod usb_attach;
+#[cfg_attr(feature = "hsm", allow(dead_code))]
 mod vendor;
+#[cfg(not(feature = "hsm"))]
 mod worker;
 
 // The `display` build turns the ST7789 panel into the status indicator, and its
@@ -70,10 +92,18 @@ compile_error!(
      display` — the `firmware-display` nix flavor sets this for you"
 );
 
+// The trusted display's flows are the security key's — passkeys, clientPIN, the
+// PIV and OpenPGP pads — and the HSM image carries none of them.
+#[cfg(all(feature = "hsm", feature = "display"))]
+compile_error!("the `hsm` image has no trusted-display build: drop `display` or `hsm`");
+
 use flash_storage::FLASH_SIZE;
 use handler::{FidoRng, Store};
+#[cfg(feature = "hsm")]
+use hsm_worker::{ClientCcid, Worker};
 #[cfg(not(feature = "display"))]
 use presence::ButtonPresence;
+#[cfg(not(feature = "hsm"))]
 use worker::{ClientCcid, ClientCtap, Worker};
 
 use panic_halt as _;
@@ -135,6 +165,7 @@ const _: () = assert!(YUBICO_PRODUCT.len() <= rsk_phy::USB_STR_MAX);
 /// build VID, so a runtime Yubico repoint is internally consistent.
 /// ⚠ this lets a phy-repointed default key present a full Yubico identity at
 /// runtime — a deliberate masquerade capability (see docs/threat-model.md).
+#[cfg(not(feature = "hsm"))]
 fn openpgp_mfr_for(vid: u16) -> u16 {
     if vid == YUBICO_VID {
         rsk_openpgp::consts::OPGP_MFR_YUBICO
@@ -402,12 +433,15 @@ static CONFIG_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static BOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static MSOS_DESC: StaticCell<[u8; 64]> = StaticCell::new();
 static CONTROL_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+#[cfg(not(feature = "hsm"))]
 static HID_STATE: StaticCell<HidState> = StaticCell::new();
+#[cfg(not(feature = "hsm"))]
 static KBD_STATE: StaticCell<HidState> = StaticCell::new();
 // The OTP frame protocol is served on the keyboard interface only. macOS gates a
 // Generic Desktop/Keyboard HID nub behind Input Monitoring while the 0xF1D0 FIDO nub
 // opens unprompted, so answering OTP on the FIDO interface would hand slot programming
 // and challenge-response to any unprivileged console-user process (audit run-30).
+#[cfg(not(feature = "hsm"))]
 static OTP_HID_HANDLER_KBD: StaticCell<otp_kbd::OtpHidHandler> = StaticCell::new();
 static USB_HANDLER: StaticCell<led::StatusHandler> = StaticCell::new();
 // Holds the LED power-enable `Output` for the device's lifetime; dropping it would
@@ -436,6 +470,7 @@ static DEVICE_HOOKS: StaticCell<RefCell<handler::DeviceHooks>> = StaticCell::new
 /// The device's one FIDO session state. Static because both the CTAPHID handler and
 /// the CCID transport's FIDO applet borrow it for the whole run — a second copy
 /// would hand a host a second per-boot PIN-mismatch budget.
+#[cfg(not(feature = "hsm"))]
 static FIDO_STATE: StaticCell<RefCell<rsk_fido::FidoState>> = StaticCell::new();
 // Same RefCell invariant as FS/RNG above — thread-executor only.
 // Sized for a 32-byte phy product plus the appended YubiKey interface-token
@@ -478,6 +513,7 @@ async fn usb_task(mut device: SendUsb) {
     device.0.run().await;
 }
 
+#[cfg(not(feature = "hsm"))]
 #[embassy_executor::task]
 async fn ctap_task(mut ctap: CtapHid<'static, Drv, ClientCtap>) {
     ctap.run().await;
@@ -568,6 +604,7 @@ async fn main(spawner: Spawner) {
     // and the second one then takes the build defaults -- including the interface
     // mask, which is the one field here that is a gate rather than an identity.
     let phy_boot = rsk_phy::boot_load(&mut fs);
+    #[cfg(not(feature = "hsm"))]
     let usb_itf = phy_boot.usb_itf();
     let phy = phy_boot.record();
     if let Some(phy) = phy {
@@ -620,14 +657,25 @@ async fn main(spawner: Spawner) {
             serial_id: &serial_id,
             otp_key: mkek.as_deref(),
         };
-        let _ = rsk_fido::seed::migrate_keydev_boot(&dev, &mut fs);
-        rsk_rescue::keydev::migrate_kbase(&dev, &mut fs, &mut rng);
-        rsk_piv::migrate_kbase(&dev, &mut fs, &mut rng);
-        rsk_oath::migrate_seal(&dev, &mut fs, &mut rng);
-        rsk_otp::migrate_seal(&dev, &mut fs, &mut rng);
-        rsk_fido::credential::migrate_rp_seal(&dev, &mut fs);
-        let _ = rsk_fido::seed::ensure_seed(&dev, &mut fs, &mut rng);
-        let _ = rsk_openpgp::scan_files(&dev, &mut fs, &mut rng);
+        #[cfg(not(feature = "hsm"))]
+        {
+            let _ = rsk_fido::seed::migrate_keydev_boot(&dev, &mut fs);
+            rsk_rescue::keydev::migrate_kbase(&dev, &mut fs, &mut rng);
+            rsk_piv::migrate_kbase(&dev, &mut fs, &mut rng);
+            rsk_oath::migrate_seal(&dev, &mut fs, &mut rng);
+            rsk_otp::migrate_seal(&dev, &mut fs, &mut rng);
+            rsk_fido::credential::migrate_rp_seal(&dev, &mut fs);
+            let _ = rsk_fido::seed::ensure_seed(&dev, &mut fs, &mut rng);
+            let _ = rsk_openpgp::scan_files(&dev, &mut fs, &mut rng);
+        }
+        // The HSM's migrations, then its attestation identity under the rescue
+        // applet's device key. A boot that cannot make it carries on unbindable
+        // rather than wedged: the rest of the device answers, the rescue applet too.
+        #[cfg(feature = "hsm")]
+        {
+            let devk = read_fused(devk_source);
+            let _ = rsk_device::hsm_boot(&dev, devk.as_deref(), &mut fs, &mut rng);
+        }
         // One-shot at-rest hardening: the seal migrations above leave the superseded
         // chip-serial-sealed copies recoverable from a flash dump until a GC lap
         // reclaims the page. The marker, the write order and the crash-safety are
@@ -676,6 +724,7 @@ async fn main(spawner: Spawner) {
     // unconditionally would let an unprivileged host walk the 15-bit counter to its
     // ceiling — where it saturates while the RAM session counter restarts at 0, so the
     // key re-emits (useCtr, sessionCtr) pairs a validation server rejects as replays.
+    #[cfg(not(feature = "hsm"))]
     if !pin_lock::was_warm_boot() {
         let mkek = read_fused(mkek_source);
         let dev = Device {
@@ -705,6 +754,7 @@ async fn main(spawner: Spawner) {
     };
     let usb_manufacturer = phy_manufacturer.unwrap_or(vid_manufacturer);
     let usb_product = phy_product.unwrap_or(vid_product);
+    #[cfg(not(feature = "hsm"))]
     let openpgp_mfr = openpgp_mfr_for(usb_vid);
 
     let mut config = UsbConfig::new(usb_vid, usb_pid);
@@ -714,7 +764,7 @@ async fn main(spawner: Spawner) {
     config.max_power = 100;
     config.max_packet_size_0 = 64;
     // bcdDevice build counter; also surfaced on the trusted-display Firmware screen.
-    let device_release: u16 = 0x09DD;
+    let device_release: u16 = 0x09DE;
     config.device_release = device_release;
 
     let mut builder = Builder::new(
@@ -729,7 +779,9 @@ async fn main(spawner: Spawner) {
     // The keyboard (OTP) interface is built FIRST so it lands on interface 0 like a
     // stock YubiKey: the libusb backend ykpers/ykcore ships — KeePassXC, ykchalresp,
     // pam_yubico — claims interface 0 and sends the OTP frame reports there blind.
+    #[cfg(not(feature = "hsm"))]
     let otp_enabled = usb_itf & rsk_phy::USB_ITF_KB != 0;
+    #[cfg(not(feature = "hsm"))]
     let kbd = otp_enabled.then(|| {
         HidWriter::<_, 8>::new(
             &mut builder,
@@ -750,6 +802,7 @@ async fn main(spawner: Spawner) {
     // fixed issue #55. Serving the frame protocol on the FIDO interface too gains no
     // host that needs it and only removes the macOS Input Monitoring gate (see
     // OTP_HID_HANDLER_KBD), so keep this interface CTAP-only (audit run-30).
+    #[cfg(not(feature = "hsm"))]
     let hid = (usb_itf & rsk_phy::USB_ITF_HID != 0).then(|| {
         HidReaderWriter::<_, 64, 64>::new(
             &mut builder,
@@ -785,8 +838,17 @@ async fn main(spawner: Spawner) {
     } else {
         ATR_RSKEY
     };
+    #[cfg(not(feature = "hsm"))]
     let ccid = (usb_itf & rsk_phy::USB_ITF_CCID != 0)
         .then(|| Ccid::new(&mut builder, ClientCcid, card_atr, ccid_pin_support));
+    // The HSM image is its card: no interface mask a host wrote can switch it off.
+    #[cfg(feature = "hsm")]
+    let ccid = Some(Ccid::new(
+        &mut builder,
+        ClientCcid,
+        card_atr,
+        ccid_pin_support,
+    ));
 
     // Go green (idle) the moment the host configures us, not on the first applet
     // command — a healthy, enumerated key with no PC/SC client talking to it would
@@ -799,6 +861,7 @@ async fn main(spawner: Spawner) {
     // reset window starts here rather than at the time driver's zero.
     usb_attach::mark();
     let usb = builder.build();
+    #[cfg(not(feature = "hsm"))]
     let ctap = hid.map(|h| {
         let (reader, writer) = h.split();
         CtapHid::new(
@@ -813,12 +876,14 @@ async fn main(spawner: Spawner) {
     interrupt::SWI_IRQ_1.set_priority(Priority::P2);
     let hp = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_1);
     hp.spawn(usb_task(SendUsb(usb)).unwrap());
+    #[cfg(not(feature = "hsm"))]
     if let Some(ctap) = ctap {
         hp.spawn(ctap_task(ctap).unwrap());
     }
     if let Some(ccid) = ccid {
         hp.spawn(ccid_task(ccid).unwrap());
     }
+    #[cfg(not(feature = "hsm"))]
     if let Some(kbd) = kbd {
         hp.spawn(otp_kbd::kbd_task(kbd).unwrap());
     }
@@ -908,13 +973,16 @@ async fn main(spawner: Spawner) {
         // CONFIG_READ's effective map empty.
         // The floor `set_timeout_secs` applies has to show up here too, or a record
         // storing 5 would advertise a 5 s window the device never actually waits.
-        let effective_timeout_secs = phy
-            .as_ref()
-            .and_then(|p| p.presence_timeout)
-            .filter(|&t| t != 0)
-            .map(|t| t.max(presence::MIN_TIMEOUT_SECS))
-            .unwrap_or(30);
-        rsk_fido::config::set_effective_phy(led_gpio, led_driver, effective_timeout_secs);
+        #[cfg(not(feature = "hsm"))]
+        {
+            let effective_timeout_secs = phy
+                .as_ref()
+                .and_then(|p| p.presence_timeout)
+                .filter(|&t| t != 0)
+                .map(|t| t.max(presence::MIN_TIMEOUT_SECS))
+                .unwrap_or(30);
+            rsk_fido::config::set_effective_phy(led_gpio, led_driver, effective_timeout_secs);
+        }
 
         match led_driver {
             1 => {
@@ -1164,7 +1232,22 @@ async fn main(spawner: Spawner) {
     let hooks_ref = DEVICE_HOOKS.init(RefCell::new(handler::DeviceHooks));
     let (kvm, kvc) = (kvmain_range(), kvcnt_range());
     let kv_total = (kvm.end - kvm.start) + (kvc.end - kvc.start);
+    #[cfg(feature = "hsm")]
+    let worker = Worker::new(
+        fs_ref,
+        rng_ref,
+        presence_ref,
+        platform_ref,
+        hooks_ref,
+        serial_id,
+        serial_hash,
+        mkek_source,
+        devk_source,
+        kv_total,
+    );
+    #[cfg(not(feature = "hsm"))]
     let fido_state_ref = FIDO_STATE.init(RefCell::new(rsk_fido::FidoState::new()));
+    #[cfg(not(feature = "hsm"))]
     let worker = Worker::new(
         fs_ref,
         rng_ref,

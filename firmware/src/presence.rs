@@ -154,7 +154,7 @@ impl Board for Button {
     }
 }
 
-/// The presence backend the [`crate::worker::Worker`] owns, selected at build
+/// The presence backend the worker owns, selected at build
 /// time so the worker wiring stays backend-agnostic. The standard key confirms
 /// with the BOOTSEL button (or a `PRESENCE_PIN` GPIO); the `display` build swaps
 /// this alias to the `crate::display::TouchPresence` that renders on-screen

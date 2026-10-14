@@ -101,8 +101,12 @@ impl rsk_sdk::Rng for FidoRng {
 
 /// The applet wiring, bound to this board's types. The wiring itself is
 /// `rsk-device`; these aliases are what the worker names.
+#[cfg(not(feature = "hsm"))]
 pub type Ctap<'a> = rsk_device::AppletHandler<'a, FlashStorage, FidoRng, VendorPlatform>;
+#[cfg(not(feature = "hsm"))]
 pub type Ccid<'a> = rsk_device::CcidApplets<'a, FlashStorage, FidoRng, VendorPlatform>;
+#[cfg(feature = "hsm")]
+pub type Hsm<'a> = rsk_device::HsmApplets<'a, FlashStorage, FidoRng, VendorPlatform>;
 
 /// What `rsk-device` reaches back into the board for: the LED atomics a flash
 /// record cannot reach, the watchdog register that carries the clientPIN soft

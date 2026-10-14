@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 RS-Key contributors
+#
+# Waveshare RP2350-USB-A — RP2350A, 2 MB flash, one WS2812 RGB LED on GPIO16,
+# the BOOT key for presence, a native USB-C port and a USB-A port driven by PIO.
+# The board the HSM image is sized for: build it with `--features hsm`. GPIO12
+# and GPIO13 carry the USB-A port's data lines; nothing here may claim them.
+# The LED's byte order is not yet confirmed on hardware: if red and green come
+# up swapped, build with LED_ORDER=grb.
+
+[usb]
+vidpid = "RSKey"
+
+[led]
+kind = "ws2812"
+pin = 16
+order = "rgb"
+
+[presence]
+source = "bootsel"
+
+[flash]
+size_mb = 2
+kvmain_kb = 896

@@ -171,6 +171,13 @@ impl<'a, S: Storage, R: rsk_sdk::Rng + 'static, VP: rsk_vendor::Platform> HsmApp
         self.resp.zeroize();
     }
 
+    /// Wipe what a warm reset would leave in SRAM: the response buffer and the
+    /// HSM's session and lock keys. The worker's reboot path calls this last.
+    pub fn scrub_secrets(&mut self) {
+        self.scrub();
+        self.hsm.forget();
+    }
+
     /// Unlock an armed HSM with a secret the board obtained itself, rather than
     /// one a host boxed over the lock channel — the door a token on the USB-A
     /// port comes in by. Same check, same state, as the host's UNLOCK.

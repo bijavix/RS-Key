@@ -33,14 +33,17 @@ const SEL_OTP_READ: u8 = 3;
 #[cfg(feature = "bench")]
 const OTP_READ_REPS: u32 = 100;
 
-/// Pending reboot request: 0 = none, 1 = warm reboot,
-/// 2 = secure reboot to the BOOTSEL bootloader. Set by the applet's REBOOT and
-/// consumed by the worker once the SW_OK response has been sent — the reset can't
-/// run inline or the host never sees the reply.
+/// Pending reboot request: 0 = none, [`REBOOT_WARM`], or [`REBOOT_BOOTSEL`]. Set by
+/// the applet's REBOOT and consumed by the worker once the SW_OK response has been
+/// sent — the reset can't run inline or the host never sees the reply.
 static REBOOT: AtomicU8 = AtomicU8::new(0);
+/// A warm reboot: `main` runs again.
+pub const REBOOT_WARM: u8 = 1;
+/// A secure reboot into the BOOTSEL bootloader, so a reflash finds no RAM secret.
+pub const REBOOT_BOOTSEL: u8 = 2;
 
 /// Take and clear any pending reboot request (the worker, after the response
-/// flushes). `Some(1)` = warm reboot, `Some(2)` = secure reboot to BOOTSEL.
+/// flushes): [`REBOOT_WARM`] or [`REBOOT_BOOTSEL`].
 pub fn take_reboot() -> Option<u8> {
     match REBOOT.swap(0, Ordering::Relaxed) {
         0 => None,
@@ -50,7 +53,8 @@ pub fn take_reboot() -> Option<u8> {
 
 /// Queue a reboot (also used by the rescue applet's REBOOT_BOOTSEL command).
 pub fn request_reboot(bootsel: bool) {
-    REBOOT.store(if bootsel { 2 } else { 1 }, Ordering::Relaxed);
+    let mode = if bootsel { REBOOT_BOOTSEL } else { REBOOT_WARM };
+    REBOOT.store(mode, Ordering::Relaxed);
 }
 
 /// Whether a reboot is queued but not yet serviced (peek, does not clear). The display's

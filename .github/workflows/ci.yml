@@ -251,6 +251,16 @@ jobs:
           - name: 16mb
             args: ""
             env: "FLASH_SIZE=16M"
+          # The HSM image and its geometry siblings: 2mb is the Waveshare
+          # RP2350-USB-A it is sized for, 16mb the TenStar RP2350-USB.
+          - name: hsm
+            args: "--features hsm"
+          - name: hsm-2mb
+            args: "--features hsm"
+            env: "FLASH_SIZE=2M KVMAIN=896K"
+          - name: hsm-16mb
+            args: "--features hsm"
+            env: "FLASH_SIZE=16M"
           # One row per shipped board file. Nothing else in the tree builds a
           # `BOARD=`, so without these a wrong pin or flash size in a TOML — the
           # values a user gets by following the CHANGELOG — reaches them uncaught.
@@ -272,6 +282,10 @@ jobs:
           - name: board-abrobot-16m
             args: ""
             env: "BOARD=abrobot-16m"
+          # The board the HSM image is sized for, built as that image.
+          - name: board-waveshare-usb-a
+            args: "--features hsm"
+            env: "BOARD=waveshare-usb-a"
           # The strict admin-write posture (historical default). The permissive
           # default is what every other row builds; smoke-build this so the
           # strict-gated code keeps compiling.

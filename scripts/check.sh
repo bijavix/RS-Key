@@ -167,6 +167,69 @@ firmware_stack_floor() {
   fi
 }
 
+# Every feature the firmware declares but the ones named, comma-separated — the
+# list a row needs when two features exclude each other and `--all-features` is
+# therefore not a build. Read from the manifest, so a new feature joins the list.
+firmware_features_but() {
+  cargo metadata --no-deps --format-version 1 | python3 -c '
+import json, sys
+skip = set(sys.argv[1:]) | {"default"}
+pkg = next(p for p in json.load(sys.stdin)["packages"] if p["name"] == "firmware")
+print(",".join(sorted(f for f in pkg["features"] if f not in skip)))' "$@"
+}
+
+# The HSM image's ceiling, measured on the 2 MB geometry it is sized for (the
+# Waveshare RP2350-USB-A), whose code region is 1024K. It hugs the measured image
+# (580 KiB) with the key's margin, so a dependency that drags one of the key's
+# applets back in — or a second copy of a curve — trips it. Same ratchet rules.
+HSM_FLASH_BUDGET_KIB=610
+hsm_size_budget() {
+  local elf="target/thumbv8m.main-none-eabihf/release/firmware"
+  local bytes kib
+  bytes=$(arm-none-eabi-size "$elf" | awk 'NR==2 { print $1 + $2 }')
+  kib=$(( (bytes + 1023) / 1024 ))
+  echo "hsm image ${kib} KiB / ${HSM_FLASH_BUDGET_KIB} KiB ceiling ($(( kib * 100 / HSM_FLASH_BUDGET_KIB ))%); code region is 1024K"
+  if [ "$kib" -gt "$HSM_FLASH_BUDGET_KIB" ]; then
+    echo "FAIL: the hsm image ${kib} KiB exceeds the ${HSM_FLASH_BUDGET_KIB} KiB budget." >&2
+    echo "      If the growth is intended, raise HSM_FLASH_BUDGET_KIB in scripts/check.sh." >&2
+    exit 1
+  fi
+}
+
+# The HSM image's floor. Its deepest paths — an RSA-4096 keygen, a backup restore —
+# hold a few KiB of frames, with the bignums on the heap; what the floor is for is
+# the key's lesson, statics growing into the stack with no build step reading it.
+HSM_STACK_FLOOR_KIB=192
+hsm_stack_floor() {
+  local elf="target/thumbv8m.main-none-eabihf/release/firmware"
+  local top bot kib
+  top=$(arm-none-eabi-nm "$elf" | awk '$3 == "_stack_start" { print $1 }')
+  bot=$(arm-none-eabi-nm "$elf" | awk '$3 == "_stack_end" { print $1 }')
+  kib=$(( (0x$top - 0x$bot) / 1024 ))
+  echo "hsm stack ${kib} KiB / ${HSM_STACK_FLOOR_KIB} KiB floor"
+  if [ "$kib" -lt "$HSM_STACK_FLOOR_KIB" ]; then
+    echo "FAIL: the hsm image has only ${kib} KiB of stack, under the ${HSM_STACK_FLOOR_KIB} KiB floor." >&2
+    echo "      Static RAM grew into the stack. Shrink it, or lower the floor deliberately." >&2
+    exit 1
+  fi
+}
+
+# Which applets an image links, read off its symbol table: the HSM applet rides in
+# `rsk-device`, which every image depends on, so `cargo tree` cannot tell the two
+# images apart — only what the linker kept can.
+image_links_none_of() {
+  local elf="target/thumbv8m.main-none-eabihf/release/firmware"
+  local crate found=0
+  for crate in "$@"; do
+    if arm-none-eabi-nm "$elf" | grep -q "$crate"; then
+      echo "FAIL: $crate is linked into $(basename "$elf")" >&2
+      found=1
+    fi
+  done
+  [ "$found" -eq 0 ] || exit 1
+  echo "none of $* is linked"
+}
+
 # The display flavor's floor. Two things share that stack and the linker can see
 # neither: the same ML-DSA-65 keygen peak as above, and one retained display frame
 # — `rsk_ui::scene::RETAINED_FRAME_STACK_BYTES`, 32 KiB, held there by a const
@@ -501,9 +564,12 @@ run "rustdoc (host private)"   env RUSTDOCFLAGS="-D warnings" cargo doc --worksp
 # these two rows take the default target instead of $HOST. `BOARD` because
 # rsk-wipe refuses to guess a flash size, `LED_KIND=none` because `--all-features`
 # turns on `display`, whose compile_error guard demands it. rsk-wipe declares no
-# features, so only the firmware needs the second permutation.
+# features, so only the firmware needs the second permutation — every feature but
+# `hsm`, which a compile_error keeps apart from `display`; the third row is the
+# HSM image's.
 run "rustdoc (embedded)"       env BOARD=waveshare-one RUSTDOCFLAGS="-D warnings" cargo doc -p firmware -p rsk-wipe --no-deps
-run "rustdoc (firmware all-feat)" env BOARD=waveshare-one LED_KIND=none RUSTDOCFLAGS="-D warnings" cargo doc -p firmware --no-deps --all-features
+run "rustdoc (firmware all-feat)" env BOARD=waveshare-one LED_KIND=none RUSTDOCFLAGS="-D warnings" cargo doc -p firmware --no-deps --features "$(firmware_features_but hsm)"
+run "rustdoc (firmware hsm)"   env BOARD=waveshare-one RUSTDOCFLAGS="-D warnings" cargo doc -p firmware --no-deps --features hsm
 run "rustdoc (tui)"            env RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path tools/tui/Cargo.toml --no-deps --target "$HOST"
 run "rustdoc (emu)"            env RUSTDOCFLAGS="-D warnings" cargo doc --manifest-path tools/emu/Cargo.toml --no-deps --target "$HOST"
 # `--bins` is load-bearing: cargo-fuzz writes `doc = false` on all 53 targets, so
@@ -576,6 +642,7 @@ run "build firmware (release)" cargo build --release -p firmware
 run "assurance-trace image identity" assurance_trace_is_image_neutral
 run "firmware size budget"     firmware_size_budget
 run "firmware stack floor"     firmware_stack_floor
+run "hsm code absent from the key image" image_links_none_of rsk_hsm
 run "no debug vendor command in the image" debug_vendor_commands_absent
 run "partition table fences the store" partition_table_fences_the_store
 run "sealed image retires its unsigned IMAGE_DEF" release_image_retires_its_unsigned_image_def
@@ -630,6 +697,16 @@ run "display code absent from default image" sh -c '
   if printf "%s\n" "$out" | grep -qE "rsk-ui|rsk-bip39|rsk-slip39|mipidsi"; then
     echo "FAIL: display code (rsk-ui/rsk-bip39/rsk-slip39/mipidsi) leaked into the default (no-display) firmware image"; exit 1
   fi'
+# The HSM image (`--features hsm`) composes its own CCID-only device over the same
+# bring-up, so nothing above compiles its worker or its boot pass. Lint it, build
+# the 2 MB geometry it is sized for, and hold that image to its own ratchets, its
+# partition fence, and to carrying none of the key's applets.
+run "clippy (hsm firmware)"    cargo clippy -p firmware --features hsm -- -D warnings
+run "build firmware (hsm 2M)"  env FLASH_SIZE=2M KVMAIN=896K cargo build --release -p firmware --features hsm
+run "hsm image size budget"    hsm_size_budget
+run "hsm stack floor"          hsm_stack_floor
+run "partition table fences the store (hsm 2M)" partition_table_fences_the_store
+run "key applets absent from the hsm image" image_links_none_of rsk_fido rsk_openpgp rsk_piv rsk_oath rsk_otp rsk_mgmt
 # The test build: no BOOTSEL presence, so the automated suites don't hang on a touch.
 run "build firmware (test, --features no-touch)" cargo build --release -p firmware --features no-touch
 # rsk-wipe bakes its erase length AND its LED wiring in at build time, and it is

@@ -150,6 +150,15 @@ impl<'a> HsmApplet<'a> {
         }
     }
 
+    /// Forget every secret held in RAM — the session's HMK, an unlocked DK, an
+    /// unused lock channel — ahead of a reset that would leave SRAM as it is. An
+    /// armed device reads as locked again; the record is re-read on next use.
+    pub fn forget(&mut self) {
+        self.sess = Session::default();
+        self.channel = None;
+        self.lock = Lock::Unknown;
+    }
+
     /// Settle the lock from the device record, once per power cycle. A failed
     /// read leaves it undecided, and the next command reads again.
     fn probe<S: Storage>(&mut self, fs: &mut Fs<S>) -> Result<(), Sw> {

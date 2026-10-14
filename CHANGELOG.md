@@ -93,6 +93,20 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
   shares are owed. `rsk-rsa` gains `rsa_from_ned`, which recovers the primes of a
   key that travelled as `n, e, d` (NIST SP 800-56B Appendix C), and `d_be`.
   **bcdDevice → 0x09DD.**
+- **The HSM image.** `--features hsm` builds a second product from the same
+  bring-up: one CCID interface, product string `RS-Key HSM`, whose card is the
+  HSM applet between the vendor and rescue applets — no FIDO, OpenPGP, PIV,
+  OATH, OTP or management applet, no keyboard or CTAPHID interface. Its boot pass
+  carries the HSM's records across an OTP burn and mints the device attestation
+  key; its worker wipes the session's keys, the unlocked lock, the DRBG and
+  core1's last prime before a reboot. Three new release flavors: `hsm` (4 MB),
+  `hsm-2mb` (`FLASH_SIZE=2M KVMAIN=896K`, the Waveshare RP2350-USB-A it is sized
+  for, which gets a `waveshare-usb-a` board preset) and `hsm-16mb`. The image is
+  580 KiB on the 2 MB geometry; `check.sh` holds it under a 610 KiB ratchet and a
+  stack floor, reads its symbol table to keep the key's applets out of it and the
+  HSM applet out of the key image, and documents the firmware with every feature
+  but `hsm`, which cannot be built with `display`. The key image is the same code
+  as before ([build.md](docs/build.md#the-hsm-image)). **bcdDevice → 0x09DE.**
 
 ## [0.4.11] - 2026-09-08
 

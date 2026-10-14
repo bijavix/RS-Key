@@ -173,6 +173,13 @@ strict-config = ["rsk-mgmt/strict-config", "rsk-fido/strict-config", "rsk-otp/st
 # firmware --features display` (the panel is the status indicator, so there is no
 # addressable LED, which also frees GPIO16 for the backlight).
 display = ["rsk-device/display", "dep:rsk-display", "dep:rsk-ui", "dep:rsk-bip39", "dep:rsk-slip39", "dep:mipidsi", "dep:embedded-graphics"]
+# The HSM image: the same board bring-up as the security key, but a CCID-only USB
+# device whose card is the HSM applet (a SmartCard-HSM-compatible subset OpenSC
+# drives as a PKCS#11 token) between the vendor and rescue applets — no FIDO, no
+# OpenPGP, PIV, OATH, OTP or management. Not combinable with `display` (a
+# compile_error says so). Build `cargo build --release -p firmware --features
+# hsm`; it ships as the `firmware-hsm` flavors. See docs/build.md#the-hsm-image.
+hsm = []
 
 [[bin]]
 name = "firmware"

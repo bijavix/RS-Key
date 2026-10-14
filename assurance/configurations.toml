@@ -843,6 +843,33 @@ this column is the one where their disposition may be STRONGER than the \
 default's — which the matrix has no way to say until someone measures it."""
 
 [[question]]
+column = "firmware-hsm"
+owner = "contributor"
+settled_by = "absence"
+text = """
+A different product on the same bring-up: one CCID interface whose card is the \
+HSM applet, between the vendor and rescue applets. `check.sh` holds `rsk_fido`, \
+`rsk_openpgp`, `rsk_piv`, `rsk_oath`, `rsk_otp` and `rsk_mgmt` out of its symbol \
+table, so the FIDO, PIN and applet rows are about code this image does not \
+link — but every one of those crates still RESOLVES here, through `rsk-device`, \
+which is why no derivation can say so and the cells stay open. The rows that \
+are not absence are the transport, store, boot and rescue ones whose owners it \
+does link: was any of their evidence produced with the HSM applet as the CCID \
+client?"""
+
+[[question]]
+column = "firmware-hsm-2mb"
+owner = "contributor"
+settled_by = "absence"
+text = "The `firmware-hsm` question at the `firmware-2mb` geometry — 2 MB with `KVMAIN` at 896 K — which is the board the HSM image is sized for."
+
+[[question]]
+column = "firmware-hsm-16mb"
+owner = "contributor"
+settled_by = "absence"
+text = "The `firmware-hsm` question at the `firmware-16mb` geometry: the 16 MB partition map on which a wipe once left a whole store intact."
+
+[[question]]
 column = "keygen-bench"
 owner = "contributor"
 settled_by = "evidence"
@@ -974,3 +1001,13 @@ in `check.sh` builds `firmware` on it at all. The board loop builds `rsk-wipe`, 
 and both `BOARD=` firmware rows pin `waveshare-one`. So the column is real and \
 WHOLLY UNEXERCISED, and what is left to decide is whether the tree should build \
 it, or whether it should be a knob of `firmware-display` instead."""
+
+[[question]]
+column = "waveshare-usb-a"
+owner = "contributor"
+settled_by = "evidence"
+text = """
+The `firmware-2mb` geometry with BOOTSEL presence and a WS2812 on GPIO16 whose \
+byte order is not yet confirmed on hardware. The board is sized for the HSM \
+image and CI builds it as that image; built as a key it is the `firmware-2mb` \
+question on this board's pins."""

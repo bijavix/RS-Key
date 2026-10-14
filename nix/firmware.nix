@@ -335,6 +335,34 @@ in
         "strict-config"
       ];
     };
+    # The HSM image (docs/build.md#the-hsm-image): a CCID-only device whose card is the
+    # HSM applet, for a server's PKCS#11 key store rather than a person's logins.
+    # Same geometry siblings as the key: 2 MB (the Waveshare RP2350-USB-A, KVMAIN
+    # shrunk as for `firmware-2mb`) and 16 MB (the TenStar RP2350-USB).
+    firmware-hsm = mkFirmware {
+      name = "firmware-hsm";
+      cargoFlags = [
+        "--features"
+        "hsm"
+      ];
+    };
+    firmware-hsm-2mb = mkFirmware {
+      name = "firmware-hsm-2mb";
+      flashSize = "2M";
+      kvmain = "896K";
+      cargoFlags = [
+        "--features"
+        "hsm"
+      ];
+    };
+    firmware-hsm-16mb = mkFirmware {
+      name = "firmware-hsm-16mb";
+      flashSize = "16M";
+      cargoFlags = [
+        "--features"
+        "hsm"
+      ];
+    };
   };
 
   # The firmware builder itself, for arbitrary one-off declarative combos
