@@ -33,8 +33,9 @@ against the OpenSC sources before any code was written:
   domain parameters (OpenSC identifies the curve by `p` and `a`).
 - **What it cannot reach**: EdDSA (the driver registers RSA and ECDSA only), AES
   keys (no secret-key objects for this driver), key domains beyond the default,
-  public-key authentication, secure messaging. Those are out of the subset; AES
-  and the DKEK functions stay reachable through `rsk hsm` and raw APDUs.
+  public-key authentication, secure messaging. Those are out of the subset; the
+  DKEK functions stay reachable through `sc-hsm-tool` and `rsk hsm`, AES keys
+  through raw APDUs.
 
 So the alternative — a custom PKCS#11 module or an OpenSC patch — is not needed.
 
@@ -90,8 +91,8 @@ algorithm list → touch (option `0x0100`).
 | LOCK (RS-Key) | `80 E8` P1 | `00` status, `01` channel, `02` unlock, `03` arm, `04` disarm | see below |
 
 Refused outright, with a status word rather than silence: RSA below 2048,
-P-192/P-224, brainpool (flash), EdDSA, PKA, transport/session/bio PINs, secure
-messaging, key domains other than the default.
+P-192/P-224, brainpool (not in the curve table), EdDSA, PKA,
+transport/session/bio PINs, secure messaging, key domains other than the default.
 
 ## Key store and sealing
 
@@ -101,14 +102,17 @@ leaves both sides intact. SmartCard-HSM FIDs are translated, never stored as-is:
 
 | SmartCard-HSM | Holds | `rsk-fs` FID | At rest |
 |---|---|---|---|
-| — | state: initialized, options, PIN lengths and retry limits, DKEK share count + KCV | `A000` | plain |
-| — | SO-PIN verifier, retry counters | `A001`, `A002` | plain (verifier is kbase-keyed) |
-| — | `ENV_DEV`, `ENV_USER`, `ENV_SO`, `ENV_DKEK` | `A003`–`A006` | sealed (below) |
-| — | lock record: factor, parameters, check value | `A007` | plain (check value is DK-keyed) |
-| `CC00` | device authentication key | `A008` | sealed under kbase |
-| `2F02` / `2F03` / `2F10` | device certificate / token info / unwrap staging | `A009`–`A00B` | plain |
-| `CCxx` | key objects (type, metadata, material) | `A1xx` | sealed under HMK |
-| `C4xx` `C8xx` `C9xx` `CAxx` `CExx` `CFxx` | PRKD, CD, DCOD, CA certs, EE certs/CSRs, public data | `A2xx` … `A8xx` | plain |
+| — | initialization: options, retry limit, SO-PIN verifier, the SO's envelope of HMK — present ⇔ initialized, written last | `REC_INIT` (`0xA001`) | envelope sealed (below); verifier kbase-keyed |
+| — | the two retry counters | `REC_COUNTERS` (`0xA002`) | plain |
+| — | `ENV_DEV`, behind a clear header naming the lock factor | `REC_DEV` (`0xA003`) | sealed under `K_dev` |
+| — | `ENV_USER` | `REC_USER` (`0xA004`) | sealed under the user PIN's key |
+| — | the DKEK, or the shares imported so far | `REC_DKEK` (`0xA005`) | sealed under DK |
+| `2F03` | the label EF.TokenInfo is synthesized around | `REC_LABEL` (`0xA006`) | plain |
+| `2F02` | the device certificates | `REC_DEVAUT` (`0xA009`) | plain |
+| `2F10` | UNWRAP KEY's staging file | `REC_STAGING` (`0xA00B`) | plain |
+| `CC00` | the device authentication key | `A100` | sealed under kbase |
+| `CCxx` | key objects (type, use counter, algorithm list, material) | `A1xx` | sealed under HMK |
+| `C4xx` `C8xx` `C9xx` `CAxx` `CExx` `CFxx` | PRKD, CD, DCOD, CA certs, EE certs/requests, public data | `A2xx` … `A8xx` | plain |
 | `CDxx` | PIN-protected data objects | `A6xx` | sealed under HMK |
 
 Three keys, three layers, each answering one question:
@@ -198,8 +202,11 @@ measured figure ([build.md](build.md#the-hsm-image)).
 3. **Backup** — AES keys, DKEK shares, WRAP/UNWRAP.
 4. **Image** — `rsk-device` wiring, the firmware `hsm` feature, boards, nix flavors, gate rows.
 5. **Emulator and tests** — `--hsm`, `--vpcd`, `tests/86_hsm.py`, fuzz targets.
-6. **Interop** — OpenSC `pkcs11-tool` and LUKS enrollment, scripted.
-7. **Host tool** — `rsk hsm`.
-8. **Docs** — guide, threat model, limitations, CHANGELOG.
+6. **Host tool** — `rsk hsm`.
+7. **Interop** — OpenSC, GnuTLS, OpenSSL and LUKS enrollment, scripted
+   (`scripts/hsm-interop.sh`).
+8. **Docs** — guide, threat model, limitations, protocol, CHANGELOG.
 
-Each lands as its own commit with the gate rows that cover it.
+Each landed as its own commit with the gate rows that cover it; the host tool
+went ahead of the interop sweep, which drives it. Next, outside this design: the
+FIDO2 unlock factor on the USB-A port, and a first run on a board.

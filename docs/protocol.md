@@ -333,6 +333,8 @@ string). ⚠️ so a phy-repointed default key can present a full Yubico identit
 runtime; the USB/smartcard identity is cosmetic and host-configurable, never a
 security or anti-counterfeiting control (see docs/threat-model.md).
 
+The HSM image (§12) defaults to `RS-Key` / `RS-Key HSM` under the same VID:PID.
+
 **Recognizing an RS-Key by PC/SC reader name:** the reader name contains `RS-Key`
 (default build) or `RSK` (Yubico-interop build). Neither appears in a genuine
 YubiKey's reader name. Reference: `RSK_READER_TOKENS` in
@@ -406,6 +408,9 @@ Sources: `crates/rsk-fido/src/consts.rs`,
 `firmware/src/vendor.rs`. Which AID each transport actually offers is not in any
 of those: it is the applet list `crates/rsk-device/src/ccid.rs` builds for CCID
 and the one-entry list in `crates/rsk-device/src/ctap.rs` for `CTAPHID_MSG`.
+
+The HSM image registers a different list — the Vendor/LED applet, the HSM applet
+and Rescue, and nothing else — on CCID alone; §12 has it.
 
 ---
 
@@ -1278,3 +1283,114 @@ SET     00 10 40 11        # P1=0x40 brightness, P2 = color 1 | status 1<<4 = 0x
    implementation of everything here: `ccid.py` (transport), `ctaphid.py` (CTAP),
    `hw.py` (phy), `led.py` (LED), `backup.py` (`0x41`), `status.py`/`inventory.py`
    (DeviceInfo). When in doubt, match its bytes.
+
+---
+
+## 12. The HSM image
+
+The `hsm` build ([build.md](build.md#the-hsm-image), [guides/hsm.md](guides/hsm.md))
+is a second product on one of the same transports: **CCID only** — no CTAPHID, no
+keyboard interface — with the product string `RS-Key HSM`, the RS-Key VID:PID and
+the RS-Key ATR. Its card registers three applets, in this order, which is the
+order a prefix SELECT resolves in (§4):
+
+| Applet | AID | |
+|---|---|---|
+| Vendor / LED | `F0 00 00 00 01` | §8 |
+| **HSM** | `E8 2B 06 01 04 01 81 C3 1F 02 01` | §12.1, §12.2 |
+| Rescue | `A0 58 3F C1 9B 7E 4F 21` | §7 |
+
+Every other AID in §4 answers `6A82` on this image. Source:
+`crates/rsk-device/src/hsm.rs` (the wiring), `crates/rsk-hsm` (the applet), and
+`tools/rsk/hsm.py` (the reference client for §12.2).
+
+### 12.1 The SmartCard-HSM subset
+
+The HSM applet speaks the part of the CardContact SmartCard-HSM command set that
+OpenSC's built-in `sc-hsm` driver uses, so `opensc-pkcs11.so`, `sc-hsm-tool` and
+`pkcs15-tool` drive it as they drive that card. The commands, their access
+conditions and the order those are checked in are tabulated in
+[hsm-design.md](hsm-design.md#command-subset), and OpenSC's `card-sc-hsm.c` is
+the reference client. What a client of its own needs beyond those:
+
+- **SELECT** of the AID answers the FCP
+  `62 0A 82 01 38 85 05 <options:2> FF <major> <minor>` — the INITIALIZE options
+  (`0000` before initialization) and the firmware's version — and ends the login
+  session, which is OpenSC's logout.
+- **Files** are SmartCard-HSM file identifiers: `CCxx` keys, `C4xx` key
+  descriptions, `C8xx` certificate descriptions, `C9xx` data-object descriptions,
+  `CAxx` CA certificates, `CDxx` PIN-protected data, `CExx` end-entity
+  certificates and key requests, `CFxx` readable data, and `2F02` (the device
+  certificates), `2F03` (token info), `2F10` (UNWRAP KEY's staging file). A key
+  file is never read back. Each file holds at most `MAX_VALUE_BYTES` (`4078`)
+  bytes.
+- **GENERATE KEY PAIR** answers a CV-certificate request
+  `67 { 7F21 { 7F4E body, 5F37 sig }, 42 holder, 5F37 sig' }`: the inner
+  signature is the new key's, the outer one the device key's (`CC00`, P-256) over
+  the inner certificate and the holder reference. EC public keys carry their
+  full domain parameters (`81`…`87`); signatures are raw `r ‖ s`. `2F02` holds
+  the device key's certificate signed by the rescue applet's device key
+  (secp256k1, §7), then that key's self-signed certificate.
+- **Status words** beyond §2.1: `6985` for a command that needs the key store
+  while the lock (§12.2) is closed — a PIN try is not spent; `6982` for a missing
+  login, a refused touch or a read of a key file; `63Cx` / `6983` for a wrong or
+  blocked PIN; `6A88` before initialization and for a reference that does not
+  exist (a PIN, a DKEK); `6581` for a flash fault, which never spends a PIN try
+  either.
+
+### 12.2 The LOCK instruction (`80 E8`)
+
+RS-Key's own, outside the SmartCard-HSM set. The lock seals the key store under
+the device root and a 32-byte secret the owner holds, and every power-up leaves
+it closed until UNLOCK presents the secret (design:
+[hsm-design.md](hsm-design.md#pin-and-lock-state-machine)).
+
+| P1 | Command | Data in | Data out | Needs |
+|---|---|---|---|---|
+| `00` | STATUS | — | `ver ‖ state ‖ factor ‖ flags` | nothing |
+| `01` | CHANNEL | host point `04 ‖ X ‖ Y` (P-256) | device point `04 ‖ X ‖ Y` | nothing |
+| `02` | UNLOCK | box(secret) — 60 bytes | — | a pending channel; the lock armed |
+| `03` | ARM, P2 = factor | box(secret ‖ SO-PIN) — 68 bytes | — | initialized, disarmed; SO-PIN; a touch |
+| `04` | DISARM | SO-PIN, 8 bytes, in the clear | — | initialized, unlocked; SO-PIN; a touch |
+
+`P2` is `00` everywhere but ARM, where it names the factor:
+`LOCK_FACTOR_HOST_KEY` (`0x01`) is the only one this build arms with.
+`LOCK_FACTOR_FIDO2_HMAC_SECRET` (`0x02`) is reserved for a FIDO2 token's
+`hmac-secret` read on the board's own USB-A port, and ARM refuses it with `6A86`.
+
+**STATUS** answers four bytes. `ver` is `01`. `state` is
+`LOCK_STATE_DISARMED` (`0x00`), `LOCK_STATE_LOCKED` (`0x01`),
+`LOCK_STATE_UNLOCKED` (`0x02`, armed and open until power-off) or
+`LOCK_STATE_UNKNOWN` (`0xFF`, the record could not be read this power cycle).
+`factor` is `LOCK_FACTOR_NONE` (`0x00`) when disarmed, otherwise the armed
+factor. `flags` is a bit set:
+`LOCK_FLAG_INITIALIZED` (`0x01`);
+`LOCK_FLAG_OTP_ROOT` (`0x02`), the device root is the OTP-fused one rather than
+the chip-serial fallback;
+`LOCK_FLAG_USER_VERIFIED` (`0x04`), the user PIN is verified in this session;
+`LOCK_FLAG_RESCRUB_REFUSED` (`0x08`), the flash refused to re-arm the at-rest
+scrub this power cycle.
+
+**The channel.** CHANNEL agrees an ephemeral P-256 key with the host's and
+answers the device's public point. Both sides derive
+`k = HKDF-SHA256(salt = "RSK-HSM/LOCK-CHANNEL", ikm = ECDH x-coordinate,
+info = device point ‖ host point)`, 32 bytes. A box is
+`nonce(12) ‖ ChaCha20-Poly1305(k, nonce, plaintext, aad = device point) ‖ tag(16)`,
+and a channel opens exactly one: UNLOCK or ARM consumes it whether the box opens
+or not, and a new CHANNEL, a SELECT or a power cycle discards an unused one. The
+SO-PIN inside ARM's box is the 8 bytes `sc-hsm-tool` takes as 16 hex digits.
+
+| Status word | Meaning here |
+|---|---|
+| `9000` | done |
+| `6700` | STATUS with data; a box of the wrong length; a DISARM SO-PIN that is not 8 bytes |
+| `6A80` | a host point that is not on P-256; a box that does not open |
+| `6A86` | an unknown P1; P2 ≠ `00` outside ARM; ARM with a factor other than `01` |
+| `6A88` | ARM or DISARM before initialization |
+| `6985` | UNLOCK or ARM with no channel pending; UNLOCK when disarmed; ARM when armed; DISARM while locked |
+| `6982` | UNLOCK with the wrong secret; a refused touch |
+| `63Cx` / `6983` | a wrong or blocked SO-PIN |
+| `6581` | a flash fault, or a record that cannot be read |
+
+`rsk hsm lock arm | unlock | disarm` and `rsk hsm status` are the reference client
+(`tools/rsk/hsm.py`: `seal_box`, `Hsm.lock_box`, `Hsm.lock_status`).

@@ -588,6 +588,77 @@ the image it ran on. This is a property of the silicon revision and boot
 configuration, so it is re-measured when either moves; the explicit wipes stay as
 depth in case a future one keeps SRAM.
 
+## The HSM image
+
+The HSM image ([guides/hsm.md](guides/hsm.md)) is a second product built from
+this tree: the same board, device root, OTP and secure-boot story, and the same
+attackers as above, but one applet — a PKCS#11 key store OpenSC serves — and a
+server rather than a person at the other end of the cable. What changes is
+below. What does not includes §4: the RP2350 is not a secure element, and a key
+on it is not a key in one.
+
+- **Keys leave only wrapped.** Every private and secret key is made on the
+  device or restored into it, and WRAP KEY is the only way out: AES-256-CBC
+  under a key derived from the DKEK, then a CMAC under another, in the
+  SmartCard-HSM's blob format. A key whose algorithm list leaves out wrapping
+  never leaves at all, and a device initialized without DKEK shares has no DKEK
+  and exports nothing. UNWRAP checks the MAC before it decrypts a byte, and
+  rebuilds and checks a restored key whole — an RSA key from its parts, an EC
+  key against its curve and public point — before storing it.
+- **At rest, the PIN opens the keys and the device root opens what the PIN is
+  tried against.** Key objects are sealed (AES-256-GCM, bound to their file id)
+  under a master key only the user PIN — or the SO-PIN — opens. Those envelopes
+  are keyed by a store key, and the store key is sealed under `kbase`, the
+  device root every other record here uses. Once the OTP master key is fused, a
+  flash dump is no offline oracle for either PIN; before that, `kbase` derives
+  from the chip serial, and a dump plus the serial makes a short PIN guessable
+  offline. A PIN try is spent and persisted before the PIN is checked, and the
+  snapshot rollback above resets these counters as it does every other —
+  unless the lock is armed.
+- **The lock adds a factor the device does not hold.** Armed, the store key is
+  sealed under `kbase` *and* a 32-byte secret the owner keeps, and every
+  power-up leaves the store shut until that secret arrives over an ephemeral
+  channel (P-256 agreement, HKDF-SHA256, ChaCha20-Poly1305 bound to the
+  device's half). While it is shut nothing that needs the store key runs: no
+  PIN is tried, so there is no counter to spend, roll back or guess against,
+  and no flash dump — not even one from an attacker who has read the fuses —
+  opens the store. Like the soft-lock's, it is a defence that holds past §4, and
+  only while the secret is kept away from the device. Arming supersedes a copy
+  of the store key sealed under `kbase` alone, which stays in flash until the
+  at-rest scrub the arm re-arms runs at the next boot; the at-rest half starts
+  there. The opened key is held in RAM until power is lost and wiped before
+  every reboot.
+- **What the lock does not cover.** An unlocked HSM serves whoever has the PIN,
+  as any token does: the lock is about the device at rest, not about a
+  compromised server. Unlocking has no retry counter — the secret is 256 random
+  bits, so there is nothing for one to slow down. The SO-PIN still
+  re-initializes a locked device, which erases every key: denial of service,
+  not disclosure. A secret kept on the server the HSM is plugged into protects
+  the HSM taken alone, not the two taken together.
+- **The SO-PIN is a key-use credential.** With RESET RETRY COUNTER allowed —
+  the option `sc-hsm-tool` sets — the SO-PIN can give the user PIN a new value,
+  so whoever holds it can use every key. Its verifier is keyed by `kbase` alone,
+  because re-initializing a locked device needs it; before the OTP burn that
+  verifier and the chip serial are an offline oracle for the SO-PIN, which is
+  why the guide draws one at random.
+- **DKEK shares are imported without a PIN.** MANAGE KEY DOMAIN takes a share
+  from any process on the host while one is owed — that is how `sc-hsm-tool`
+  drives the card — so a process that gets there first can make the DKEK one it
+  knows. The device reports the key check value of what it holds, and comparing
+  it with the share's is the defence; the guide makes it a step.
+- **Attestation is trust on first use.** The attestation key that countersigns
+  every generated key is made on the device at its first boot and sealed under
+  `kbase` alone, because it outlives owners, PINs and the lock; its certificate
+  is signed by the rescue applet's device key, which is the root
+  `rsk hsm attest` checks and pins. Nothing above that root says the device is
+  genuine, and whoever recovers `kbase` — the §4 attacker — can make the
+  device's attestations say anything.
+- **Side channels.** RSA SIGN and DECIPHER run the same blinded, fault-checked
+  private operation as PIV and OpenPGP, so §4's RSA window residual applies to
+  an HSM key unchanged. Rebuilding an RSA key from a backup that carries
+  `n, e, d` — recovering its primes — is not constant-time; it runs once per
+  restore, on a key the operator is importing.
+
 ## Supply chain & process
 
 - `cargo audit` + `cargo deny` (advisories, license allow-list, source

@@ -37,6 +37,7 @@
 - [AAGUID & metadata](guides/aaguid-metadata.md)
 - [Fleet tooling](guides/fleet.md)
 - [FIPS-style profile](guides/fips.md)
+- [HSM image: LUKS, SSH, a TLS CA](guides/hsm.md)
 
 # Production hardening
 

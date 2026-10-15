@@ -295,3 +295,58 @@ covers the security boundary. This page covers feature and hardware gaps.
   eagerly with a one-shot full-GC-lap compaction.
 - **The board is the security boundary**: anyone with the device and your
   PIN is you. Same as every security key.
+
+## HSM image
+
+The [HSM image](guides/hsm.md) is a separate build with gaps of its own, listed
+here. The board's gaps above — no secure element, slow RSA generation — hold for
+it unchanged, and its security boundary is in the
+[threat model](threat-model.md#the-hsm-image).
+
+- **Not certified, and not a substitute for an HSM that is.** No FIPS 140 or
+  Common Criteria claim exists or is sought. Use it for keys whose loss you can
+  recover from — a homelab's LUKS, SSH and internal CA keys — not for keys a
+  lab-funded attacker would be after. *Status: inherent to the hardware class.*
+- **No Ed25519.** OpenSC's driver for the SmartCard-HSM command set knows RSA and
+  ECDSA only, so an EdDSA key would be invisible to every PKCS#11 application;
+  the image does not make one. *Status: until that driver reaches EdDSA.*
+- **Brainpool, P-192 and P-224 are refused.** The image keeps P-256, P-384, P-521
+  and secp256k1. The brainpool arithmetic exists (the OpenPGP applet uses it) but
+  is not in the HSM's curve table; the two short NIST curves are below the
+  strength of every other key here. RSA below 2048 bits is refused for the same
+  reason. *Status: brainpool not yet; the rest by design.*
+- **No AES through PKCS#11.** The HSM makes, uses (CBC, CMAC) and backs up AES
+  keys, but OpenSC exposes no secret-key objects for this card, and `rsk hsm`
+  has no AES commands either: they are reachable by raw APDU, which is how
+  `tests/86_hsm.py` drives them. *Status: not yet — a host tool could.*
+- **The SmartCard-HSM's other features are absent.** Key domains beyond the
+  default, public-key authentication (m-of-n operator keys), secure messaging,
+  and transport, session and biometric PINs are refused with a status word
+  rather than half-done, and so is an INITIALIZE that asks for them. *Status:
+  not planned for a single server's key store.*
+- **No SHA-1 on the device.** SIGN can hash on the device with SHA-224 to
+  SHA-512, never SHA-1. OpenSC hashes on the host and sends the digest anyway,
+  so this binds only a client that drives the card directly. *Status: by
+  design.*
+- **No touch policy from host tools.** INITIALIZE option `0x0100` makes every
+  private-key operation wait for a touch, but `sc-hsm-tool` cannot set it and
+  `rsk hsm` does not yet; only a raw INITIALIZE does. A server that unlocks
+  unattended would not want it on anyway. *Status: not yet.*
+- **The lock's second factor is not here yet.** The lock reserves a factor for
+  a FIDO2 token's `hmac-secret`, read on the Waveshare RP2350-USB-A's PIO USB-A
+  port with no host involved; this build refuses to arm with it and ships the
+  host-delivered secret only ([roadmap](roadmap.md)). *Status: not yet.*
+- **LUKS depends on the systemd version.** systemd 255 enrolls an RSA key with a
+  certificate on the token and nothing else; EC keys and a bare public key need
+  systemd 256, and systemd 261 enrolls RSA with OAEP. OpenSC unpads OAEP over
+  the card's raw RSA, and that has been checked through `pkcs11-tool`, but no
+  systemd past 255 has been run against the image. *Status: upstream.*
+- **Not yet run on a board.** Every interop result so far is the emulator in a
+  virtual PC/SC reader ([testing.md](testing.md)): the USB transport, the
+  timings of RSA generation and restore, and the board-specific parts of the
+  Waveshare RP2350-USB-A preset (its LED, its button) are unverified on
+  hardware. *Status: not yet.*
+- **A blocked SO-PIN cannot be unblocked.** The keys stay usable with the user
+  PIN, but the device can no longer be re-initialized, unblock the user PIN or
+  arm and disarm its lock. Nothing above the SO-PIN could unblock it without
+  becoming the way around it. *Status: by design.*

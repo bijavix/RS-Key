@@ -40,6 +40,8 @@ host-side tooling to drive and provision all of it.
 - **[Build options](build.md)**: every compile-time flag and environment knob
 - **[Using the device](guides/fido2.md)**: per-feature guides for FIDO2, SSH,
   OpenPGP, PIV, OATH, OTP, seed backup, soft-lock, and more
+- **[HSM image](guides/hsm.md)**: the other product built from this tree — a
+  PKCS#11 key store for a server's LUKS, SSH and TLS CA keys
 - **[Production hardening](production.md)**: OTP master key + secure boot
   (**irreversible** fuses; read it end to end first)
 - **[Security](threat-model.md)**: threat model, [limitations](limitations.md),

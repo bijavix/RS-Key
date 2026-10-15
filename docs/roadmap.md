@@ -50,6 +50,13 @@ of the friction people actually hit is here, not in the firmware.
 is that every artifact can be verified without taking this repository's word
 for anything ([supply-chain.md](supply-chain.md)).
 
+**The HSM image, on boards and with a second factor.** The HSM image has run
+against OpenSC, GnuTLS and LUKS on the emulator; the direction is the same run on
+the boards it is sized for, then an unlock that needs no host: a FIDO2 token in
+the Waveshare RP2350-USB-A's USB-A port whose `hmac-secret` opens the lock. The
+lock's record already names the factor and its state machine does not change
+for it ([hsm-design.md](hsm-design.md#pin-and-lock-state-machine)).
+
 ## What this project will not do
 
 Some of these are settled and argued elsewhere; they are listed here so the

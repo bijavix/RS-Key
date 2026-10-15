@@ -39,8 +39,10 @@ such as Google Chrome or Microsoft Edge.
 Download the newest `rs-key-<version>-default.uf2` from the
 [releases page](https://github.com/TheMaxMur/RS-Key/releases/latest). Take
 `2mb`, `16mb` or `display` instead if that is your board;
-[releases.md](releases.md) has the table of all fourteen images, the cosign
-signature check, and the reproducibility check.
+[releases.md](releases.md) has the table of all seventeen images, the cosign
+signature check, and the reproducibility check. The three `hsm` images are a
+different product — a PKCS#11 key store for a server — and
+[their guide](guides/hsm.md) is where to start with one.
 
 Every published image is a **touch build**: FIDO operations (registering,
 logging in) require a press of the presence button, BOOTSEL by default.

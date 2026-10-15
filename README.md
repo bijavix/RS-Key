@@ -93,6 +93,9 @@ and you confirm with the physical button instead of an on-screen one.
 - **Seed backup** — export the FIDO master seed as BIP-39 / SLIP-39 words
 - **At-rest soft-lock** — keep the FIDO seed in flash encrypted to a key only you hold
 - **On-device audit journal** and **enterprise (org-provisioned) attestation**
+- **An HSM image** (a separate build) — a PKCS#11 key store through OpenSC for a
+  server: LUKS unlock with `systemd-cryptenroll`, SSH host and CA keys, a small
+  TLS CA ([guide](docs/guides/hsm.md))
 - **Post-quantum FIDO2 (experimental)** — implements all three ML-DSA schemes:
   ML-DSA-44 (COSE −48), ML-DSA-65 (−49) and ML-DSA-87 (−50), on an in-tree,
   stack-optimized FIPS 204 implementation that streams the matrix A so even the

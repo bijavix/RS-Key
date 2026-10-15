@@ -194,7 +194,9 @@ button, the second core — is the security key's, and what the host sees is not
 The device enumerates as one CCID interface (product string `RS-Key HSM`, the
 RS-Key VID:PID and ATR) whose card is the HSM applet, between the vendor and
 rescue applets every image carries. OpenSC's built-in `sc-hsm` driver serves it
-as a PKCS#11 token; the design is [hsm-design.md](hsm-design.md).
+as a PKCS#11 token; the design is [hsm-design.md](hsm-design.md), and
+[guides/hsm.md](guides/hsm.md) sets one up — PINs, backups, LUKS, SSH and a TLS
+CA.
 
 | Flavor | Knobs | Board |
 |---|---|---|

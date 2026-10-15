@@ -27,7 +27,7 @@ It builds every artifact reproducibly, hashes it, and signs the manifest.
   | `2mb` | `FLASH_SIZE=2M KVMAIN=896K` | 2 MB boards (Seeed XIAO RP2350, Waveshare RP2350-Zero-CM) |
   | `16mb` | `FLASH_SIZE=16M` | 16 MB boards (e.g. TenStar RP2350-USB) |
   | `strict-config` | + strict-config | the historical strict admin-write posture: config writes stay presence/PIN-gated and the ungated transport writes are refused ([build.md](build.md), [threat-model.md](threat-model.md)). The `default` build is now the permissive full-ykman admin surface |
-  | `hsm` | + hsm | **the HSM image, not a security key**: one CCID interface whose card is a PKCS#11 key store through OpenSC — a server's LUKS unlock, SSH and CA keys ([build.md](build.md#the-hsm-image)) |
+  | `hsm` | + hsm | **the HSM image, not a security key**: one CCID interface whose card is a PKCS#11 key store through OpenSC — a server's LUKS unlock, SSH and CA keys ([guide](guides/hsm.md), [build.md](build.md#the-hsm-image)) |
   | `hsm-2mb` | + hsm, `FLASH_SIZE=2M KVMAIN=896K` | the HSM image for 2 MB boards (the Waveshare RP2350-USB-A it is sized for) |
   | `hsm-16mb` | + hsm, `FLASH_SIZE=16M` | the HSM image for 16 MB boards (e.g. TenStar RP2350-USB) |
 

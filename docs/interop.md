@@ -121,6 +121,23 @@ accordingly:
 | `ykman otp info` | OTP slot state | no-touch (needs `VIDPID=Yubikey5`) | `tests/interop/run.py` | ✅ `0759` |
 | OTP keyboard (types the code) | USB-HID keyboard emulation | touch | manual (focus a text field) | ✅ `0759` (short-tap typed the static slot verbatim, `2026-06-13`) |
 
+### HSM image (PKCS#11 through OpenSC)
+
+Every cell here is ⏳ on hardware. Each has run green against the HSM image on
+the emulator in vsmartcard's `vpcd` reader (`0x09DF`, 2026-10-14), OpenSC 0.25,
+GnuTLS 3.8, cryptsetup 2.7, systemd 255, OpenSSH 9.6, OpenSSL 3.0 with
+pkcs11-provider 0.3 — a protocol result, not a device result
+([testing.md](testing.md)).
+
+| Consumer | What it exercises | Build | How | Status |
+|---|---|---|---|---|
+| `sc-hsm-tool` | initialize, DKEK share import, key wrap / unwrap round trip | `hsm` | `tests/interop/hsm.py` | ⏳ (emulator ✅) |
+| OpenSC `pkcs11-tool` | EC P-256 + RSA-2048 keygen, `--test`, ECDSA, ECDH, RSA sign / decrypt (PKCS#1, OAEP-SHA256) | `hsm` | `tests/interop/hsm.py` | ⏳ (emulator ✅) |
+| GnuTLS `certtool` / `p11tool` | self-signed certificate on a token key, stored on the token | `hsm` | `tests/interop/hsm.py` | ⏳ (emulator ✅) |
+| `systemd-cryptenroll` + `cryptsetup` | LUKS2 keyslot on the token's RSA key; refused while the lock is closed | `hsm` | `tests/interop/hsm.py` | ⏳ (emulator ✅; systemd 255) |
+| OpenSSH `ssh-keygen -D` / `-s`, `sshd` `HostKeyAgent` | SSH CA signing; a host key held by `ssh-agent` | `hsm` | manual ([guide](guides/hsm.md#ssh)) | ⏳ (emulator ✅) |
+| OpenSSL `pkcs11-provider` | a TLS CA: self-signed root, a server certificate issued under it | `hsm` | manual ([guide](guides/hsm.md#a-tls-ca)) | ⏳ (emulator ✅) |
+
 ## Differential against a real YubiKey
 
 The matrix above proves each RS-Key cell works. This layer asks a sharper

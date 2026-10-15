@@ -890,6 +890,20 @@ what is still written twice is the worker's sequencing and the board's own
 ([tools/emu/README.md](https://github.com/TheMaxMur/RS-Key/tree/main/tools/emu)
 lists the gaps). A green emulator run is a protocol result, not a device result.
 
+**The HSM image** runs the same way. `--hsm` serves its card — the same
+`HsmApplets` and boot pass the firmware runs — and `scripts/emu-suites.sh` runs
+`tests/86_hsm.py` against it in a session of its own. `--vpcd` then does for it
+what `--usbip` does for the key: it inserts the card in vsmartcard's `vpcd`
+reader, so `pcscd`, and OpenSC, `pkcs11-tool` and `systemd-cryptenroll` on top
+of it, see a smart card with no USB stack and no root. `scripts/hsm-interop.sh`
+builds the emulator, inserts the card, and runs `tests/86_hsm.py` over real
+pyscard and then `tests/interop/hsm.py`, which drives `sc-hsm-tool`,
+`pkcs11-tool`, GnuTLS, OpenSSL and LUKS and checks each result with another tool
+than the one that made it. It needs `pcscd` with the vpcd driver, OpenSC and —
+for the LUKS steps — `cryptsetup`, `systemd-cryptenroll` and root on the host: a
+PC/SC stack no checkout carries, so it is a hand run that
+`scripts/reproduce.sh` records, not yet a CI job.
+
 ## Latency harness
 
 Timing a crypto primitive from the host is noisy. On the RP2350 the hot working

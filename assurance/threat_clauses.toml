@@ -425,6 +425,66 @@ the transcript, the picotool version, and what the result does *not* establish,
 which is that the firmware's own scrub works."""]
 
 [[clause]]
+id = "TM-HSM"
+kind = "defence"
+where = "## The HSM image"
+
+[[clause]]
+id = "TM-HSM-WRAP-ONLY"
+kind = "defence"
+where = "- **Keys leave only wrapped.** Every private and secret key is made on the"
+
+[[clause]]
+id = "TM-HSM-AT-REST"
+kind = "defence"
+where = "- **At rest, the PIN opens the keys and the device root opens what the PIN is"
+
+[[clause]]
+id = "TM-HSM-LOCK"
+kind = "defence"
+where = "- **The lock adds a factor the device does not hold.** Armed, the store key is"
+
+[[clause]]
+id = "TM-HSM-LOCK-LIMITS"
+kind = "context"
+where = "- **What the lock does not cover.** An unlocked HSM serves whoever has the PIN,"
+why = """
+stated residuals of the lock — an unlocked token, an unthrottled unlock, an SO \
+wipe, a secret stored beside the device — that no property claims to close"""
+
+[[clause]]
+id = "TM-HSM-SO-PIN"
+kind = "context"
+where = "- **The SO-PIN is a key-use credential.** With RESET RETRY COUNTER allowed —"
+why = """
+a stated residual: the SO-PIN's reach and its pre-OTP offline oracle, which the \
+image accepts rather than defends"""
+
+[[clause]]
+id = "TM-HSM-DKEK-IMPORT"
+kind = "context"
+where = "- **DKEK shares are imported without a PIN.** MANAGE KEY DOMAIN takes a share"
+why = """
+a stated residual whose mitigation is an operator step, the key check value \
+comparison, not a device behaviour a property could serve"""
+
+[[clause]]
+id = "TM-HSM-ATTESTATION"
+kind = "context"
+where = "- **Attestation is trust on first use.** The attestation key that countersigns"
+why = """
+states what the attestation chain does not prove — no root above the device, \
+and forgeable by the out-of-scope physical attacker"""
+
+[[clause]]
+id = "TM-HSM-SIDE-CHANNELS"
+kind = "context"
+where = "- **Side channels.** RSA SIGN and DECIPHER run the same blinded, fault-checked"
+why = """
+residuals carried over from the RSA private operation and the restore path, \
+stated rather than defended"""
+
+[[clause]]
 id = "TM-SUPPLY-CHAIN"
 kind = "defence"
 where = "## Supply chain & process"

@@ -83,6 +83,7 @@ The Nix shell stays the primary, reproducible path (it also carries `picotool`,
 | `reboot` | reboot to the app or to BOOTSEL, over CCID | — |
 | `audit` | read + cryptographically verify the tamper-evident journal | [Audit journal](audit.md) |
 | `offboard` | guided full wipe + signed receipt; prompts for a replug **(destructive)** | [Fleet tooling](fleet.md) |
+| `hsm` | the HSM image: `status`, `attest`, the lock (`arm`/`unlock`/`disarm`), DKEK shares | [HSM image](hsm.md) |
 
 > Note the two distinct "OTP"s: **`rsk otp`** burns the device's at-rest master
 > key into RP2350 one-time-programmable fuses (a production ritual). The
@@ -120,7 +121,9 @@ PIN-gated commands are:
 
 This is always the FIDO2 clientPIN (the one `rsk fido set-pin` manages), never
 an OpenPGP PW1/PW3 or a PIV PIN. Those are entered only in their own tools
-(`gpg`, `ykman`).
+(`gpg`, `ykman`). `rsk hsm` is the exception, because the HSM image has no FIDO2
+PIN: where it needs a secret, it is the HSM's SO-PIN (`--so-pin`, 16 hex
+digits, prompted if omitted).
 
 ### Touch
 
@@ -128,10 +131,10 @@ Operations that release or sign over a secret require a **physical touch**: a
 press of the BOOTSEL button while the LED blinks, within a 30-second window.
 `rsk` prints `touch the device …` to stderr before blocking. Touch-gated
 commands include `backup export`/`restore`/`finalize`, `audit verify`,
-`inventory verify`, `lock enable`/`disable`, and `fido attestation import`/
-`clear`. Read-only commands (`status`, `inventory list`, `*/status`) need no
-touch. `audit log` needs one only on a device with no PIN (the PIN token gates
-it otherwise).
+`inventory verify`, `lock enable`/`disable`, `hsm lock arm`/`disarm`, and
+`fido attestation import`/`clear`. Read-only commands (`status`,
+`inventory list`, `*/status`) need no touch. `audit log` needs one only on a
+device with no PIN (the PIN token gates it otherwise).
 
 **One press approves one operation.** Consent is per-operation, so a press is
 spent the moment the ceremony it approved returns. Holding the button through a
@@ -154,9 +157,9 @@ rsk inventory list --json        # one JSON object per connected key, per line
 ### Irreversible actions
 
 Destructive or fuse-burning commands (`offboard`, `secure-boot`, `otp`,
-`lock enable`, `openpgp reset`) require a **typed confirmation**: you type an
-exact token (e.g. `LOCK-SEED`) rather than pressing a single key. Anything else
-aborts. The OTP and secure-boot rituals burn one-time-programmable fuses and
+`lock enable`, `openpgp reset`, `hsm lock arm`, `hsm dkek create`) require a
+**typed confirmation**: you type an exact token (e.g. `LOCK-SEED`) rather than
+pressing a single key. Anything else aborts. The OTP and secure-boot rituals burn one-time-programmable fuses and
 cannot be undone. Read [Production setup](../production.md) before running them.
 
 ### Errors and exit codes

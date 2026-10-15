@@ -138,6 +138,34 @@ tag: the USB `bcdDevice` build counter (bumped on every behavior change), and
   T-of-N shares before importing it; `dkek import` rebuilds one from them. Every
   command that changes the device, or hands it a secret, binds one reader or
   none. `rsk` → 0.3.38.
+- **The HSM image against OpenSC, GnuTLS and LUKS — and its guide.**
+  `scripts/hsm-interop.sh` inserts `tools/emu --hsm` in vsmartcard's `vpcd`
+  reader and runs `tests/86_hsm.py` over real pyscard, then
+  `tests/interop/hsm.py`: `sc-hsm-tool` initializes, imports a DKEK share and
+  round-trips a key through a backup; `pkcs11-tool` generates EC and RSA keys,
+  passes its own `--test`, and signs, derives and decrypts — PKCS#1 v1.5 and
+  RSA-OAEP with SHA-256, the padding systemd 261 enrolls LUKS keys with — each
+  result checked by OpenSSL; GnuTLS stores a certificate; `systemd-cryptenroll`
+  binds a LUKS2 keyslot that `cryptsetup` opens, and that a locked HSM refuses
+  until `rsk hsm lock unlock`. Green on systemd 255, OpenSC 0.25 and GnuTLS 3.8;
+  a hand run, not CI, since no checkout carries a PC/SC stack.
+  [docs/guides/hsm.md](docs/guides/hsm.md) sets the image up end to end: a
+  random SO-PIN and why it matters, DKEK shares and the check value to compare,
+  keys and their attestation pinned with `rsk hsm attest --expect-root`, LUKS on
+  systemd 255 and what changes from 256 and 261, SSH CA signing and an `sshd`
+  host key held by `ssh-agent`, a TLS CA through OpenSSL's `pkcs11-provider`,
+  backup and restore onto a replacement HSM (run end to end: a volume enrolled
+  with one emulated HSM opened with the other), the PINs, and the lock with
+  where its secret should live. Every command in it ran against the emulator;
+  none has run on a board, and the steps that did not run at all — an
+  initramfs, the boot units — say so. The threat model gains *The HSM image*:
+  what is sealed under what, the lock as a defence that, like the soft-lock,
+  holds past a lab attack while its secret stays away from the device, and the
+  residuals — the SO-PIN as a key-use credential, DKEK shares importable
+  without a PIN, attestation as trust on first use, an RSA restore that is not
+  constant-time.
+  `limitations.md` lists the image's own gaps, and `protocol.md` §12 specifies
+  its applet list and the LOCK instruction.
 
 ## [0.4.11] - 2026-09-08
 
