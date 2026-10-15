@@ -7,9 +7,10 @@ by another tool than the one that produced it:
 
   OpenSC      `sc-hsm-tool` initializes, imports a DKEK share, wraps a key,
               deletes it and unwraps it back; `pkcs11-tool` generates EC and RSA
-              keys, signs, derives and decrypts, and runs its own self-test —
-              every signature verified by OpenSSL, the ECDH secret and the RSA
-              plaintext compared with OpenSSL's
+              keys, signs, derives and decrypts — PKCS#1 v1.5 and the OAEP that
+              systemd 261 enrolls with — and runs its own self-test: every
+              signature verified by OpenSSL, the ECDH secret and the RSA
+              plaintexts compared with OpenSSL's
   GnuTLS      `certtool` self-signs a certificate with a token key and `p11tool`
               stores it; OpenSSL verifies it
   rsk         `rsk hsm attest` checks a generated key's request against the device
@@ -200,7 +201,7 @@ class Suite:
         if pathlib.Path(card).read_bytes() != pathlib.Path(host).read_bytes():
             raise StepFailed("the token and OpenSSL derived different secrets")
 
-    @step("RSA by pkcs11-tool: OpenSSL verifies the signature, decryption matches",
+    @step("RSA by pkcs11-tool: OpenSSL verifies the signature, PKCS#1 and OAEP decrypt",
           needs=("pkcs11-tool", "openssl"))
     def rsa(self):
         data, sig = self.file("data.bin"), self.file("rsa.sig")
@@ -208,14 +209,23 @@ class Suite:
                  "-o", sig, login=True)
         run(["openssl", "dgst", "-sha256", "-verify", self.file("rsa-pub.pem"),
              "-signature", sig, data])
-        secret, ct, pt = self.file("secret.bin"), self.file("secret.ct"), self.file("secret.pt")
-        pathlib.Path(secret).write_bytes(os.urandom(32))
-        run(["openssl", "pkeyutl", "-encrypt", "-pubin", "-inkey", self.file("rsa-pub.pem"),
-             "-in", secret, "-out", ct])
-        self.p11("--decrypt", "--mechanism", "RSA-PKCS", "--id", ID_RSA, "-i", ct, "-o", pt,
-                 login=True)
-        if pathlib.Path(pt).read_bytes() != pathlib.Path(secret).read_bytes():
-            raise StepFailed("the token decrypted something else")
+        # OpenSC strips either padding on the host over the card's raw RSA; OAEP
+        # with SHA-256 is what systemd 261's cryptenroll seals a LUKS key with.
+        for name, enc, dec in (
+            ("PKCS#1", [], ["--mechanism", "RSA-PKCS"]),
+            ("OAEP", ["-pkeyopt", "rsa_padding_mode:oaep", "-pkeyopt", "rsa_oaep_md:sha256",
+                      "-pkeyopt", "rsa_mgf1_md:sha256"],
+             ["--mechanism", "RSA-PKCS-OAEP", "--hash-algorithm", "SHA256",
+              "--mgf", "MGF1-SHA256"]),
+        ):
+            tag = name.lower().replace("#", "")
+            secret, ct, pt = (self.file(f"secret-{tag}.{x}") for x in ("bin", "ct", "pt"))
+            pathlib.Path(secret).write_bytes(os.urandom(32))
+            run(["openssl", "pkeyutl", "-encrypt", "-pubin", "-inkey", self.file("rsa-pub.pem"),
+                 *enc, "-in", secret, "-out", ct])
+            self.p11("--decrypt", *dec, "--id", ID_RSA, "-i", ct, "-o", pt, login=True)
+            if pathlib.Path(pt).read_bytes() != pathlib.Path(secret).read_bytes():
+                raise StepFailed(f"{name}: the token decrypted something else")
 
     @step("rsk hsm attest: the EC key was generated on this device")
     def attest(self):
