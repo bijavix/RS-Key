@@ -37,7 +37,7 @@ const FACTOR_ATTEMPTS: usize = 64;
 ///
 /// A triple is first made to carry one message there and back: every key does,
 /// and one that does not is refused for two exponentiations where the walk would
-/// spend [`FACTOR_ATTEMPTS`] of them — minutes, at 4096 bits on the device.
+/// spend `FACTOR_ATTEMPTS` of them — minutes, at 4096 bits on the device.
 pub fn rsa_from_ned(n: &[u8], e: &[u8], d: &[u8], rng: &mut dyn Rng) -> Option<RsaKey> {
     use num_bigint_dig::prime::probably_prime;
     use num_integer::Integer;
